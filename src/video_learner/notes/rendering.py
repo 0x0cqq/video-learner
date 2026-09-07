@@ -11,9 +11,9 @@ from urllib.parse import unquote, urlsplit
 from markdown_it import MarkdownIt
 from PIL import Image
 
-from .core import InputError, TaskError, contained, timestamp
-from .schemas import Chapter, FrameEvidence, NoteBlock, Notebook
-from .storage import atomic_bytes, write_json
+from video_learner.common.core import InputError, TaskError, contained, timestamp
+from video_learner.common.schemas import Chapter, FrameEvidence, NoteBlock, Notebook
+from video_learner.common.storage import atomic_bytes, write_json
 
 MARKDOWN = MarkdownIt("commonmark", {"html": True})
 ANCHOR = re.compile(rb"<!-- vl:(begin|end) (section|block) ([a-z][a-z0-9-]{1,63}) -->")

@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from video_learner.application import convert
-from video_learner.config import Config
-from video_learner.core import InputError, TaskError
-from video_learner.documents import AnchorConflict, expected_spans, image_dependencies, locate
-from video_learner.schemas import Draft, DraftBlock, Notebook
+from video_learner.common.config import Config
+from video_learner.common.core import InputError, TaskError
+from video_learner.common.schemas import Draft, DraftBlock, Notebook
+from video_learner.notes.rendering import AnchorConflict, expected_spans, image_dependencies, locate
+from video_learner.workflows.conversion import convert
 
 
 class DeterministicProvider:

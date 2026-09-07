@@ -6,9 +6,11 @@
 
 P0 三条命令已实现：`inspect`、`convert`、`revise`。可将单视频转换为图文 Markdown，并局部修订文字、指定帧和裁剪，保留旧版本及非目标手改内容。
 
-Windows 下 42 项离线测试、Ruff 和构建检查通过。PPT、编程、数学真实片段已完成转换与修订；Qwen 图文模型已完成约 100 分钟编程课（34 章）和约 45 分钟数学课（15 章）的完整转换。语音识别统一使用阿里云 Qwen，来源精确到音频切片区间。人工内容正确性和整理耗时对照仍待验收，详见[验证记录](docs/validation.md)。
+Windows 下 45 项离线测试、Ruff 和构建检查通过。PPT、编程、数学真实片段已完成转换与修订；Qwen 图文模型已完成约 100 分钟编程课（34 章）和约 45 分钟数学课（15 章）的完整转换。语音识别统一使用阿里云 Qwen，来源精确到音频切片区间。人工内容正确性和整理耗时对照仍待验收，详见[验证记录](docs/validation.md)。
 
 ## 文档入口
+
+源码按 `common`、`workflows`、`media`、`providers`、`notes` 分组，CLI 入口保留在包根目录；目录职责见[代码组织](docs/implementation-guide.md#3-当前代码组织)。
 
 - [用户故事](docs/user-stories.md)：P0/P1 与验收标准。
 - [技术选型](docs/technical-design.md)：媒体、转写、模型、证据和版本设计。
@@ -16,6 +18,7 @@ Windows 下 42 项离线测试、Ruff 和构建检查通过。PPT、编程、数
 - [AGENTS.md](AGENTS.md)：参与本项目的协作规则。
 - [使用指南](docs/usage.md)：安装、配置、转换、修订和错误处理。
 - [验证记录](docs/validation.md)：实际检查、真实样本与质量限制。
+- [性能分析](docs/performance.md)：整课耗时归因、cProfile 结果和复现方法。
 - [实现笔记与 ADR](docs/implementation-notes.md)：开发过程、实验和技术选择原因。
 
 ## 首版范围

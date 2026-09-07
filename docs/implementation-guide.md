@@ -34,30 +34,37 @@ P1 的断点续跑、SQLite、依赖自动失效、AI 自主补查、自然语�
 
 ## 3. 当前代码组织
 
-当前按实际职责采用单文件模块，无空目录、CLI 占位实现或 P1 接口；复杂到需要拆分时再建子包。
+源码按职责划分为五个子包，根目录保留 CLI 入口。子包只组织现有实现，包初始化不预加载业务模块。
 
 ```text
 src/video_learner/
-  cli.py              # inspect / convert / revise 参数与终端显示
-  config.py           # TOML、CLI 覆盖、环境变量或用户指定凭据文件
-  core.py             # 错误、时间、路径边界
-  schemas.py          # 来源、证据、文档块、版本与清单
-  application.py      # 转换用例编排
-  revision.py         # 显式基线与目标范围修订
-  media.py            # 普通视频/已知缓存、偏移视图、轨道与抽帧
-  evidence.py         # 音频窗口、字幕、采样与原课时间映射
-  qwen_asr.py         # 阿里云语音识别、独立凭据、有界请求与切片区间来源
-  composition.py      # 章节覆盖、固定证据包与来源校验
-  provider.py         # 供应商选择、DeepSeek 请求、共用结构校验与有界重试
-  qwen_provider.py    # Qwen 图像输入、思考/正文流分离与用量归一化
-  documents.py        # 渲染、锚点定位、字节替换与图片依赖
-  storage.py          # 清单、指纹、原子提交与 OS 文件锁
+  cli.py                  # inspect / convert / revise 参数与终端显示
+  common/
+    config.py             # TOML、CLI 覆盖与凭据配置
+    core.py               # 错误、时间、路径边界
+    schemas.py            # 来源、证据、文档块、版本与清单
+    storage.py            # 清单、指纹、原子提交、日志与 OS 文件锁
+  workflows/
+    conversion.py         # 转换用例编排
+    revision.py           # 显式基线与目标范围修订
+  media/
+    io.py                 # 普通视频/已知缓存、偏移视图、轨道与抽帧
+    evidence.py           # 音频窗口、字幕、采样与原课时间映射
+  providers/
+    base.py               # 供应商选择、DeepSeek 请求、结构校验与有界重试
+    qwen.py               # Qwen 图像输入、思考/正文流分离与用量归一化
+    asr.py                # Qwen 语音识别、独立凭据与切片区间来源
+  notes/
+    composition.py        # 章节覆盖、固定证据包与来源校验
+    rendering.py          # 渲染、锚点定位、字节替换与图片依赖
 tests/
-  conftest.py         # 临时生成小型音视频，不提交私人素材
-  test_*.py           # 时间/媒体/证据/转换/供应商/修订/可靠性
+  conftest.py             # 临时生成小型音视频，不提交私人素材
+  test_*.py               # 时间/媒体/证据/转换/供应商/修订/可靠性
+tools/
+  profile_conversion.py  # 既有日志归因与离线本地阶段 profiling
 ```
 
-依赖方向：CLI → 应用层 → 领域处理与适配器；媒体模块不调用 CLI，渲染器不直接调用模型。供应商响应先转成内部结构再交给文档层。业务层不依赖 Typer 对象，纯时间转换和文档操作可以独立测试。
+依赖方向：CLI → workflows → media / providers / notes；common 提供共用配置、结构和文件边界。媒体模块不调用 CLI，渲染器不直接调用模型。供应商响应先转成内部结构再交给文档层。跨模块使用明确的绝对导入，延迟导入仍保留在原调用点。业务层不依赖 Typer 对象，纯时间转换和文档操作可以独立测试。
 
 ## 4. 公共契约
 
@@ -196,13 +203,16 @@ P0 闭环有真实验收记录，且用户后续工作范围包含 P1 时再实�
 
 | 里程碑 | 状态 | 实际验证 / 限制 |
 | --- | --- | --- |
-| M0 工程 | 完成 | Python 3.12 安装、锁文件、帮助和离线基础检查通过 |
+| M0 工程 | 完成 | 源码按五个职责子包组织；Python 3.12、锁文件、CLI 帮助、离线检查与构建包完整性通过 |
 | M1 素材检查 | 完成 | 自造媒体和两个真实缓存通过；编程缓存检查前后媒体哈希一致 |
 | M2 证据提取 | 完成；内容对齐需持续抽查 | 真实片段 ASR/字幕路径、原课时间、候选图和原帧已验证；数学 10 分钟保留 20 张周期候选 |
 | M3 转换 | 完成；内容质量有已知限制 | PPT、编程、数学真实片段已生成图文 Markdown；Qwen 3.8 Flash 数学片段转换与跨供应商修订通过机械校验 |
 | M4 修订 | 完成 | 真实章节修订与指定帧/裁剪、旧版哈希、非目标字节、独立复制通过；离线覆盖冲突场景 |
 | M5 验收 | 自动检查与运行基线完成；人工验收待办 | 三类短片段已有真实转换及修订，约 100 分钟整课 34 章完成；Qwen 已完成真实短音频比较及 10 分钟数学转换；未取得人工修订耗时对照，不声称整体质量验收通过 |
 
-当前默认离线检查为 42 项通过，Ruff 检查通过。真实产物在忽略目录 `output/`，详细测量、可携带版本验证和内容检查在 `artifacts/evaluations/`。源文件只读、引用存在、时间合法和手改保护的机械验证不代表模糊公式或图注已全部人工确认。
+当前默认离线检查为 45 项通过，Ruff 检查通过。真实产物在忽略目录 `output/`，详细测量、可携带版本验证和内容检查在 `artifacts/evaluations/`。源文件只读、引用存在、时间合法和手改保护的机械验证不代表模糊公式或图注已全部人工确认。
 
 实际验证汇总见[验证记录](validation.md)，包含三类片段、版本保护、内容抽查及未覆盖项。
+
+
+开发侧性能检查可运行 `uv run python tools/profile_conversion.py output/programming-full output/math-full --report-dir artifacts/profiling/my-run --local`，输出目录必须是新目录。它分析既有日志并离线回放本地阶段，不新增 P0 命令、不发模型请求；逐函数结果和计时限制见[性能分析](performance.md)。

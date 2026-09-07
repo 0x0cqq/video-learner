@@ -12,7 +12,7 @@
 | --- | --- |
 | 环境 | Python 3.12、uv、uv.lock；Windows 为首个验证平台 |
 | CLI | Typer/Rich，参数、错误提示与 stderr 阶段事件 |
-| 应用 | application.py 编排转换，revision.py 编排修订；不依赖 Typer 对象 |
+| 应用 | workflows/conversion.py 编排转换，workflows/revision.py 编排修订；不依赖 Typer 对象 |
 | 媒体 | PyAV，只读偏移流、轨道探测、seek、音频重采样 |
 | 图片 | Pillow/NumPy，ROI、灰度变化、周期候选覆盖 |
 | ASR | 阿里云 Qwen ASR，有界音频切片 |
@@ -21,7 +21,7 @@
 | 状态 | JSON、内容指纹、快照、临时目录、OS 文件锁 |
 | 验证 | pytest 自造媒体/模型替身、Ruff、独立真实样本评估 |
 
-代码按职责划分为实际模块，不建设空模块、通用插件框架、通用 Agent 引擎或后台服务。P1 才包含 SQLite、检查点、任务恢复、自主证据补查与复杂布局识别。
+代码按职责划分为 common（共享基础）、workflows（用例编排）、media（媒体与证据）、providers（云端模型）、notes（讲义组织与渲染）五个子包；根目录保留 cli.py。具体文件见[实现指南](implementation-guide.md#3-当前代码组织)。不建设空模块、通用插件框架、通用 Agent 引擎或后台服务。P1 才包含 SQLite、检查点、任务恢复、自主证据补查与复杂布局识别。
 
 ## 2. 导入与规范时间线
 
@@ -120,3 +120,8 @@ output/sample/
 真实 ASR、DeepSeek、Qwen、PPT/编程/数学片段与约 100 分钟整课单独记录。结构正确、内容正确、时间对齐、手改保护、人工使用效率分开评估；未经人工实测的准确率或修订耗时不填写数值。
 
 P1 在用户授权后增加 status/resume、SQLite 检查点、配置依赖失效、AI 自主补查、自然语言重新选图和复杂布局识别，当前均未实施。
+
+
+## 运行计时
+
+事件日志按每次操作记录 run_id、UTC 时间和单调时钟相对秒数，保留原有 stage/status/seconds 字段。图文请求增加章节、尝试次数、打包字节数与耗时、失败耗时和响应 ID；Qwen 流计时区分打开流、首块、思考首块、正文首块及结束，只记录延迟和计数，不保存思考文本。流内通用 API 错误以受控 TaskError 结束并记录时长，不回显原始服务消息、不自动重试。开发工具及测量边界见[性能分析](performance.md)。

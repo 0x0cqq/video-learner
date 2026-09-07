@@ -6,8 +6,8 @@ from typing import Literal
 
 from pydantic import Field, ValidationError, model_validator
 
-from .core import InputError
-from .schemas import Record
+from video_learner.common.core import InputError
+from video_learner.common.schemas import Record
 
 
 class Config(Record):

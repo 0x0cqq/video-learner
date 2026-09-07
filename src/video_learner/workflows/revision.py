@@ -8,11 +8,22 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from .application import EXTRACTION_FIELDS, extraction_hash, fingerprint_source
-from .composition import evidence_packet, validate_draft, validate_notebook
-from .config import Config, load_config, merge_provider_settings
-from .core import InputError, TaskError, contained
-from .documents import (
+from video_learner.common.config import Config, load_config, merge_provider_settings
+from video_learner.common.core import InputError, TaskError, contained
+from video_learner.common.schemas import NoteBlock, Notebook, ReviewItem
+from video_learner.common.storage import (
+    Events,
+    atomic_bytes,
+    canonical_hash,
+    digest,
+    directory_lock,
+    read_json,
+    write_json,
+)
+from video_learner.media.evidence import register_frame
+from video_learner.media.io import inspect_source
+from video_learner.notes.composition import evidence_packet, validate_draft, validate_notebook
+from video_learner.notes.rendering import (
     AnchorConflict,
     copy_dependencies,
     expected_spans,
@@ -24,18 +35,11 @@ from .documents import (
     render_chapter,
     stage_assets,
 )
-from .evidence import register_frame
-from .media import inspect_source
-from .provider import Provider, create_provider
-from .schemas import NoteBlock, Notebook, ReviewItem
-from .storage import (
-    Events,
-    atomic_bytes,
-    canonical_hash,
-    digest,
-    directory_lock,
-    read_json,
-    write_json,
+from video_learner.providers.base import Provider, create_provider
+from video_learner.workflows.conversion import (
+    EXTRACTION_FIELDS,
+    extraction_hash,
+    fingerprint_source,
 )
 
 
@@ -287,7 +291,7 @@ def revise(
                     active_provider = provider or create_provider(config, events)
                     fixed_chapter = target_chapter.model_copy(deep=True)
                     if target_block:
-                        from .documents import evidence_range
+                        from video_learner.notes.rendering import evidence_range
 
                         ranges = [
                             evidence_range(book, identity) for identity in target_block.evidence_ids

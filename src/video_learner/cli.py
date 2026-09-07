@@ -8,8 +8,8 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from .core import InputError, TaskError, timestamp
-from .media import inspect_source
+from video_learner.common.core import InputError, TaskError, timestamp
+from video_learner.media.io import inspect_source
 
 app = typer.Typer(no_args_is_help=True, help="将单视频整理为可核对、可修订的图文 Markdown。")
 console = Console(stderr=True)
@@ -66,9 +66,9 @@ def convert_command(
     ] = None,
 ) -> None:
     """转换完整视频或 [start,end) 片段，输出图文讲义。"""
-    from .application import convert
-    from .config import load_config, parse_crop
-    from .core import parse_time
+    from video_learner.common.config import load_config, parse_crop
+    from video_learner.common.core import parse_time
+    from video_learner.workflows.conversion import convert
 
     settings = load_config(
         config,
@@ -111,9 +111,9 @@ def revise_command(
     ] = None,
 ) -> None:
     """基于指定版本，只修订目标章节/段落或精确换图。"""
-    from .config import parse_crop
-    from .core import parse_time
-    from .revision import revise
+    from video_learner.common.config import parse_crop
+    from video_learner.common.core import parse_time
+    from video_learner.workflows.revision import revise
 
     path = revise(
         workdir,

@@ -6,11 +6,11 @@ import pytest
 from PIL import Image
 from test_provider import VALID, packet
 
-from video_learner.config import Config, load_config, merge_provider_settings
-from video_learner.core import TaskError
-from video_learner.provider import create_provider
-from video_learner.qwen_provider import QwenProvider
-from video_learner.storage import Events
+from video_learner.common.config import Config, load_config, merge_provider_settings
+from video_learner.common.core import TaskError
+from video_learner.common.storage import Events
+from video_learner.providers.base import create_provider
+from video_learner.providers.qwen import QwenProvider
 
 
 def chunk(content=None, reasoning=None, finish=None, usage=None):
@@ -110,7 +110,7 @@ def test_qwen_disconnect_discards_partial_answer_and_repairs_schema(tmp_path, mo
     import httpx2
     from openai import APIConnectionError
 
-    monkeypatch.setattr("video_learner.provider.time.sleep", lambda _: None)
+    monkeypatch.setattr("video_learner.providers.base.time.sleep", lambda _: None)
     streams = [
         Stream(
             [

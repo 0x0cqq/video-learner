@@ -7,9 +7,10 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
-from .core import InputError, contained
+from video_learner.common.core import InputError, contained
 
 
 def digest(path: Path) -> str:
@@ -93,13 +94,23 @@ def directory_lock(path: Path):
 
 class Events:
     def __init__(self, root: Path, progress: Callable[[str], None] | None = None):
+        """为本次操作建立独立运行 ID 和单调时钟，追加日志而不改写已有记录。"""
         self.path = contained(root, ".work/logs/events.jsonl")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.progress = progress or (lambda _: None)
+        self.run_id = uuid.uuid4().hex
+        self.started = time.monotonic()
 
     def emit(self, stage: str, status: str, **details) -> None:
-        """追加结构化事件并通知进度回调；details 必须由调用方筛选，不能含凭据或原始异常。"""
-        record = {"stage": stage, "status": status, **details}
+        """追加带 UTC 与运行内相对时间的事件；details 须由调用方筛除凭据和原始异常。"""
+        record = {
+            "stage": stage,
+            "status": status,
+            **details,
+            "run_id": self.run_id,
+            "timestamp_utc": datetime.now(UTC).isoformat(),
+            "elapsed_seconds": time.monotonic() - self.started,
+        }
         # 这里只序列化受控字段，不负责从供应商原始错误或 URL 中自动剔除敏感值。
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")

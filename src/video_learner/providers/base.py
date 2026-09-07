@@ -11,10 +11,10 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
-from .config import Config
-from .core import InputError, TaskError
-from .schemas import Draft
-from .storage import Events, atomic_bytes
+from video_learner.common.config import Config
+from video_learner.common.core import InputError, TaskError
+from video_learner.common.schemas import Draft
+from video_learner.common.storage import Events, atomic_bytes
 
 PROMPT_VERSION = "p0-2"
 SYSTEM_PROMPT = """你将原课证据整理成中文图文讲义或执行目标范围修订。
@@ -148,8 +148,9 @@ class DeepSeekProvider:
         网络重试与内容修复共用实际调用预算；认证错误和未完成响应直接终止。
         单次请求由适配器实现，Qwen 复用这里的预算、诊断及校验流程。
         """
-        from openai import APIConnectionError, APIStatusError, APITimeoutError
+        from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
 
+        payload_started = time.monotonic()
         text = json.dumps(packet, ensure_ascii=False)
         if len(text.encode("utf-8")) > 250_000 or len(images) > self.config.max_images_per_chapter:
             raise TaskError("单次证据包超过大小限制，请缩短章节或减少采样")
@@ -170,13 +171,28 @@ class DeepSeekProvider:
                     },
                 ]
             )
+        self.events.emit(
+            "model_payload",
+            "prepared",
+            seconds=time.monotonic() - payload_started,
+            text_bytes=len(text.encode("utf-8")),
+            image_bytes=total_image_bytes,
+            image_count=len(images),
+        )
         repair = None
         for attempt in range(self.config.max_retries + 1):
             if self.calls >= self.config.max_calls:
                 raise TaskError("达到模型调用次数上限，剩余章节未完成")
             self.calls += 1
             started = time.monotonic()
-            self.events.emit("model_call", "running", call=self.calls, model=self.config.model)
+            self.events.emit(
+                "model_call",
+                "running",
+                call=self.calls,
+                model=self.config.model,
+                attempt=attempt + 1,
+                chapter_id=packet.get("chapter_id"),
+            )
             try:
                 response = self._request(content, repair)
                 usage = response.usage
@@ -198,13 +214,21 @@ class DeepSeekProvider:
                 )
                 # 完整响应即使校验失败也保留供诊断；未完成响应不会走到这里。
                 atomic_bytes(raw_path, response.output_text.encode("utf-8"))
+                self.events.emit(
+                    "model_response", "saved", call=self.calls, response_id=raw_path.stem
+                )
                 draft = Draft.model_validate_json(response.output_text)
-                from .composition import validate_draft
+                from video_learner.notes.composition import validate_draft
 
                 try:
                     validate_draft(draft, packet)
                 except TaskError as exc:
-                    self.events.emit("model_validation", "failed", call=self.calls)
+                    self.events.emit(
+                        "model_validation",
+                        "failed",
+                        call=self.calls,
+                        seconds=time.monotonic() - started,
+                    )
                     if attempt == self.config.max_retries:
                         raise
                     repair = f"上次响应未通过语义校验：{exc}。请严格修复并重新输出完整 JSON。"
@@ -218,6 +242,7 @@ class DeepSeekProvider:
                     call=self.calls,
                     error_type=type(exc).__name__,
                     status_code=exc.status_code,
+                    seconds=time.monotonic() - started,
                 )
                 if exc.status_code not in (408, 409, 429) and exc.status_code < 500:
                     raise InputError(
@@ -225,7 +250,12 @@ class DeepSeekProvider:
                     ) from None
             except ValidationError as exc:
                 self.events.emit(
-                    "model_call", "failed", call=self.calls, error_type=type(exc).__name__
+                    "model_call",
+                    "failed",
+                    call=self.calls,
+                    error_type=type(exc).__name__,
+                    seconds=time.monotonic() - started,
+                    validation_types=sorted({error["type"] for error in exc.errors()}),
                 )
                 problems = [{"loc": e["loc"], "type": e["type"]} for e in exc.errors()]
                 repair = (
@@ -235,8 +265,22 @@ class DeepSeekProvider:
                 )
             except (APIConnectionError, APITimeoutError) as exc:
                 self.events.emit(
-                    "model_call", "failed", call=self.calls, error_type=type(exc).__name__
+                    "model_call",
+                    "failed",
+                    call=self.calls,
+                    error_type=type(exc).__name__,
+                    seconds=time.monotonic() - started,
                 )
+            except APIError as exc:
+                # 流内服务错误可能没有 HTTP 状态；记录类型和耗时，不能回显原始消息或盲目重试。
+                self.events.emit(
+                    "model_call",
+                    "failed",
+                    call=self.calls,
+                    error_type=type(exc).__name__,
+                    seconds=time.monotonic() - started,
+                )
+                raise TaskError("模型流式服务报告错误，本次请求未完成且不自动重试") from None
             if attempt == self.config.max_retries:
                 raise TaskError("模型请求失败，已达到重试上限；超时请求仍可能产生用量")
             time.sleep(min(2**attempt, 4))
@@ -246,7 +290,7 @@ class DeepSeekProvider:
 def create_provider(config: Config, events: Events) -> Provider:
     """按已校验配置选择图文适配器，不探测或自动回退到其他供应商。"""
     if config.provider == "qwen":
-        from .qwen_provider import QwenProvider
+        from video_learner.providers.qwen import QwenProvider
 
         return QwenProvider(config, events)
     return DeepSeekProvider(config, events)

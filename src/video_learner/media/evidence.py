@@ -6,11 +6,11 @@ from pathlib import Path
 import av
 import numpy as np
 
-from .config import Config
-from .core import US, InputError, TaskError, contained, parse_time
-from .media import crop_image, extract_frame, open_media, source_file, track_of
-from .schemas import FrameEvidence, Source, TranscriptSegment
-from .storage import atomic_bytes, digest, write_json
+from video_learner.common.config import Config
+from video_learner.common.core import US, InputError, TaskError, contained, parse_time
+from video_learner.common.schemas import FrameEvidence, Source, TranscriptSegment
+from video_learner.common.storage import atomic_bytes, digest, write_json
+from video_learner.media.io import crop_image, extract_frame, open_media, source_file, track_of
 
 
 def audio_window(path: Path, source: Source, start_us: int, end_us: int) -> np.ndarray:

@@ -8,11 +8,11 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import Config
-from .core import US, InputError, TaskError, contained
-from .provider import credential
-from .schemas import Source, TranscriptSegment
-from .storage import Events, atomic_bytes, write_json
+from video_learner.common.config import Config
+from video_learner.common.core import US, InputError, TaskError, contained
+from video_learner.common.schemas import Source, TranscriptSegment
+from video_learner.common.storage import Events, atomic_bytes, write_json
+from video_learner.providers.base import credential
 
 
 def qwen_credential(config: Config) -> str:
@@ -146,8 +146,8 @@ def transcribe_qwen(
 
     每段非空文本只关联实际窗口区间，不按字数虚构句级时间；仅关闭本函数创建的客户端。
     """
-    from .evidence import audio_window
-    from .media import track_of
+    from video_learner.media.evidence import audio_window
+    from video_learner.media.io import track_of
 
     if recognizer is None:
         validate_qwen_config(config, start_us, end_us)

@@ -5,11 +5,18 @@ from pathlib import Path
 
 from PIL import Image
 
-from .config import Config
-from .core import US, TaskError, contained
-from .provider import Provider
-from .schemas import Chapter, Draft, FrameEvidence, NoteBlock, Notebook, ReviewItem
-from .storage import digest
+from video_learner.common.config import Config
+from video_learner.common.core import US, TaskError, contained
+from video_learner.common.schemas import (
+    Chapter,
+    Draft,
+    FrameEvidence,
+    NoteBlock,
+    Notebook,
+    ReviewItem,
+)
+from video_learner.common.storage import digest
+from video_learner.providers.base import Provider
 
 
 def plan_chapters(start_us: int, end_us: int, config: Config) -> list[Chapter]:
@@ -106,7 +113,7 @@ def validate_draft(draft: Draft, packet: dict) -> None:
             )
             if not local:
                 raise TaskError("模型只引用了相邻上下文，没有目标范围内的证据")
-        from .documents import validate_body
+        from video_learner.notes.rendering import validate_body
 
         validate_body(block.body)
     if any(c in draft.title for c in "\r\n<>"):

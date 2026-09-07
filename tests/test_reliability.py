@@ -8,15 +8,15 @@ import pytest
 from test_conversion import DeterministicProvider
 from test_conversion import converted as converted
 
-from video_learner.application import convert
 from video_learner.cli import main
-from video_learner.composition import validate_notebook
-from video_learner.config import Config
-from video_learner.core import InputError, TaskError, contained
-from video_learner.evidence import audio_window
-from video_learner.media import extract_frame, inspect_source
-from video_learner.revision import revise
-from video_learner.schemas import Notebook
+from video_learner.common.config import Config
+from video_learner.common.core import InputError, TaskError, contained
+from video_learner.common.schemas import Notebook
+from video_learner.media.evidence import audio_window
+from video_learner.media.io import extract_frame, inspect_source
+from video_learner.notes.composition import validate_notebook
+from video_learner.workflows.conversion import convert
+from video_learner.workflows.revision import revise
 
 
 def test_separate_audio_and_video_offsets_share_video_origin(video, tmp_path):

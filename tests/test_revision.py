@@ -6,10 +6,10 @@ from PIL import Image
 from test_conversion import DeterministicProvider
 from test_conversion import converted as converted
 
-from video_learner.core import InputError
-from video_learner.documents import image_dependencies, locate
-from video_learner.revision import revise
-from video_learner.schemas import Draft, DraftBlock, Notebook
+from video_learner.common.core import InputError
+from video_learner.common.schemas import Draft, DraftBlock, Notebook
+from video_learner.notes.rendering import image_dependencies, locate
+from video_learner.workflows.revision import revise
 
 
 @pytest.mark.parametrize(
@@ -17,9 +17,9 @@ from video_learner.schemas import Draft, DraftBlock, Notebook
 )
 def test_legacy_asr_manifest_remains_revisable(converted, provider, mode):
     """重建旧版 standard、fast 及 Qwen 清单指纹，验证兼容读取仍会拒绝原配置被篡改。"""
-    from video_learner.application import EXTRACTION_FIELDS
-    from video_learner.revision import baseline_config
-    from video_learner.storage import canonical_hash
+    from video_learner.common.storage import canonical_hash
+    from video_learner.workflows.conversion import EXTRACTION_FIELDS
+    from video_learner.workflows.revision import baseline_config
 
     root, _ = converted
     path = root / ".work/manifest.json"
@@ -208,7 +208,7 @@ def test_revision_can_switch_multimodal_provider_without_reextracting(converted,
         selected.append(config)
         return DeterministicProvider()
 
-    monkeypatch.setattr("video_learner.revision.create_provider", factory)
+    monkeypatch.setattr("video_learner.workflows.revision.create_provider", factory)
     destination = revise(root, section="ch-001", instruction="重新整理", model_provider="qwen")
     assert selected[0].provider == "qwen"
     assert selected[0].model == "qwen3.8-flash"

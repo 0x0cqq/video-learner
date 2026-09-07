@@ -5,16 +5,28 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from .composition import compose_chapter, plan_chapters, validate_notebook
-from .config import Config
-from .core import InputError, TaskError, contained, output_path, time_range
-from .documents import export_book, render_notes
-from .evidence import load_subtitles, sample_frames, save_transcript
-from .media import crop_image, extract_frame, inspect_source, source_file, track_of
-from .provider import PROMPT_VERSION, Provider, create_provider, validate_provider_config
-from .qwen_asr import transcribe_qwen, validate_qwen_config
-from .schemas import Notebook, ReviewItem, Source
-from .storage import Events, atomic_bytes, canonical_hash, digest, directory_lock, write_json
+from video_learner.common.config import Config
+from video_learner.common.core import InputError, TaskError, contained, output_path, time_range
+from video_learner.common.schemas import Notebook, ReviewItem, Source
+from video_learner.common.storage import (
+    Events,
+    atomic_bytes,
+    canonical_hash,
+    digest,
+    directory_lock,
+    write_json,
+)
+from video_learner.media.evidence import load_subtitles, sample_frames, save_transcript
+from video_learner.media.io import crop_image, extract_frame, inspect_source, source_file, track_of
+from video_learner.notes.composition import compose_chapter, plan_chapters, validate_notebook
+from video_learner.notes.rendering import export_book, render_notes
+from video_learner.providers.asr import transcribe_qwen, validate_qwen_config
+from video_learner.providers.base import (
+    PROMPT_VERSION,
+    Provider,
+    create_provider,
+    validate_provider_config,
+)
 
 EXTRACTION_FIELDS = {
     "asr_language",

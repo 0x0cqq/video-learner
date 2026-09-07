@@ -5,8 +5,8 @@ import pytest
 from typer.testing import CliRunner
 
 from video_learner.cli import app
-from video_learner.core import InputError, contained, output_path, parse_time, time_range
-from video_learner.media import OffsetReader, crop_image, extract_frame, inspect_source
+from video_learner.common.core import InputError, contained, output_path, parse_time, time_range
+from video_learner.media.io import OffsetReader, crop_image, extract_frame, inspect_source
 
 
 def test_time_and_paths(tmp_path):

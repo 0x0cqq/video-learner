@@ -4,16 +4,16 @@ import json
 import time
 from types import SimpleNamespace
 
-from .config import Config
-from .core import TaskError
-from .provider import (
+from video_learner.common.config import Config
+from video_learner.common.core import TaskError
+from video_learner.common.storage import Events
+from video_learner.providers.base import (
     SYSTEM_PROMPT,
     DeepSeekProvider,
     credential,
     strict_schema,
     validate_provider_config,
 )
-from .storage import Events
 
 
 class QwenProvider(DeepSeekProvider):
@@ -68,11 +68,19 @@ class QwenProvider(DeepSeekProvider):
                 "json_schema": {"name": "chapter", "schema": strict_schema(), "strict": True},
             },
         )
+        stream_open_seconds = time.monotonic() - started
         answer, size, finish, usage = [], 0, None, None
+        first_chunk = first_reasoning = first_answer = None
+        chunks = reasoning_characters = 0
+        exhausted = False
         phases = set()
         try:
             for chunk in stream:
-                if time.monotonic() - started > self.config.request_timeout_seconds:
+                elapsed = time.monotonic() - started
+                chunks += 1
+                if first_chunk is None:
+                    first_chunk = elapsed
+                if elapsed > self.config.request_timeout_seconds:
                     raise TaskError("Qwen 流式响应超过时间上限")
                 if getattr(chunk, "usage", None) is not None:
                     usage = chunk.usage
@@ -81,6 +89,12 @@ class QwenProvider(DeepSeekProvider):
                     continue
                 choice = chunk.choices[0]
                 delta = choice.delta
+                if getattr(delta, "reasoning_content", None):
+                    reasoning_characters += len(delta.reasoning_content)
+                    if first_reasoning is None:
+                        first_reasoning = elapsed
+                if getattr(delta, "content", None) and first_answer is None:
+                    first_answer = elapsed
                 for phase, value in (
                     ("thinking", getattr(delta, "reasoning_content", None)),
                     ("answering", getattr(delta, "content", None)),
@@ -95,8 +109,23 @@ class QwenProvider(DeepSeekProvider):
                     answer.append(delta.content)
                 if choice.finish_reason is not None:
                     finish = choice.finish_reason
+            exhausted = True
         finally:
             stream.close()
+            # 只记录客户端观察到的阶段延迟和字符数，不保存思考文本，也不推断服务端推理耗时。
+            self.events.emit(
+                "model_stream_timing",
+                "completed" if exhausted and finish == "stop" and answer else "incomplete",
+                call=self.calls,
+                seconds=time.monotonic() - started,
+                stream_open_seconds=stream_open_seconds,
+                first_chunk_seconds=first_chunk,
+                first_reasoning_seconds=first_reasoning,
+                first_answer_seconds=first_answer,
+                chunks=chunks,
+                answer_characters=size,
+                reasoning_characters=reasoning_characters,
+            )
         return SimpleNamespace(
             status="completed" if finish == "stop" and answer else "incomplete",
             output_text="".join(answer),

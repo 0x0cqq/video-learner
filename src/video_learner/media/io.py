@@ -9,8 +9,8 @@ from pathlib import Path
 import av
 from PIL import Image
 
-from .core import US, InputError, TaskError
-from .schemas import Source, Track
+from video_learner.common.core import US, InputError, TaskError
+from video_learner.common.schemas import Source, Track
 
 
 class OffsetReader(io.RawIOBase):
@@ -73,7 +73,7 @@ def open_media(path: Path):
 def source_file(source_path: Path, track: Track) -> Path:
     """将轨道中的相对文件名解析到素材根目录内，拒绝清单中的越界路径。"""
     root = source_path if source_path.is_dir() else source_path.parent
-    from .core import contained
+    from video_learner.common.core import contained
 
     return contained(root, track.file)
 

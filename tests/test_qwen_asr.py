@@ -8,12 +8,12 @@ import numpy as np
 import pytest
 from openai import APIConnectionError
 
-from video_learner.application import extraction_hash
-from video_learner.config import Config
-from video_learner.core import InputError, TaskError
-from video_learner.media import inspect_source
-from video_learner.qwen_asr import QwenASR, encode_wav, transcribe_qwen, validate_qwen_config
-from video_learner.storage import Events
+from video_learner.common.config import Config
+from video_learner.common.core import InputError, TaskError
+from video_learner.common.storage import Events
+from video_learner.media.io import inspect_source
+from video_learner.providers.asr import QwenASR, encode_wav, transcribe_qwen, validate_qwen_config
+from video_learner.workflows.conversion import extraction_hash
 
 
 def client_with(create):
@@ -58,7 +58,7 @@ def test_qwen_call_budget_and_secret_validation(tmp_path, monkeypatch):
     def create(**kwargs):
         raise APIConnectionError(request=httpx2.Request("POST", "https://example.invalid"))
 
-    monkeypatch.setattr("video_learner.qwen_asr.time.sleep", lambda _: None)
+    monkeypatch.setattr("video_learner.providers.asr.time.sleep", lambda _: None)
     service = QwenASR(Config(asr_max_calls=1), Events(tmp_path), client=client_with(create))
     with pytest.raises(TaskError, match="调用上限"):
         service.recognize(encode_wav(np.zeros(16000, dtype=np.float32)))
@@ -96,7 +96,7 @@ def test_default_conversion_uses_qwen_and_reports_missing_key(video, tmp_path, m
     """先验证缺凭据时不建输出，再注入云端替身确认默认路径及切片精度提示。"""
     from test_conversion import DeterministicProvider
 
-    from video_learner.application import convert
+    from video_learner.workflows.conversion import convert
 
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     output = tmp_path / "cloud"
@@ -115,7 +115,7 @@ def test_default_conversion_uses_qwen_and_reports_missing_key(video, tmp_path, m
             return "测试语音"
 
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
-    monkeypatch.setattr("video_learner.qwen_asr.QwenASR", Cloud)
+    monkeypatch.setattr("video_learner.providers.asr.QwenASR", Cloud)
     convert(video, output, Config(), provider=DeterministicProvider())
     assert len(calls) == 1
     assert "非句级对齐" in (output / "notes.md").read_text(encoding="utf-8")

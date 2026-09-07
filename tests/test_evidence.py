@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
 
-from video_learner.config import Config
-from video_learner.core import InputError
-from video_learner.evidence import audio_window, load_subtitles, sample_frames
-from video_learner.media import inspect_source
-from video_learner.storage import directory_lock
+from video_learner.common.config import Config
+from video_learner.common.core import InputError
+from video_learner.common.storage import directory_lock
+from video_learner.media.evidence import audio_window, load_subtitles, sample_frames
+from video_learner.media.io import inspect_source
 
 
 def test_audio_resampling_preserves_silence_and_clip_offset(video):
@@ -70,6 +70,6 @@ def test_small_temporary_board_change_retains_candidate(video, tmp_path, monkeyp
         pts = int(Fraction(at_us, 1_000_000) / Fraction(source.tracks[0].time_base))
         return image, at_us, pts
 
-    monkeypatch.setattr("video_learner.evidence.extract_frame", board)
+    monkeypatch.setattr("video_learner.media.evidence.extract_frame", board)
     frames = sample_frames(video, description, 0, 90_000_000, Config(), tmp_path / "board")
     assert any(40_000_000 <= f.at_us < 70_000_000 for f in frames)

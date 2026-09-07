@@ -2,10 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from video_learner.config import Config
-from video_learner.core import TaskError
-from video_learner.provider import DeepSeekProvider
-from video_learner.storage import Events
+from video_learner.common.config import Config
+from video_learner.common.core import TaskError
+from video_learner.common.storage import Events
+from video_learner.providers.base import DeepSeekProvider
 
 
 def packet():
@@ -66,7 +66,7 @@ def test_only_deepseek_endpoint_even_with_openai_environment(tmp_path, monkeypat
 
 def test_invalid_structure_and_unknown_evidence_have_bounded_repairs(tmp_path, monkeypatch):
     """依次返回坏结构和未知引用，确认修复反馈生效且所有请求共用调用上限。"""
-    monkeypatch.setattr("video_learner.provider.time.sleep", lambda _: None)
+    monkeypatch.setattr("video_learner.providers.base.time.sleep", lambda _: None)
     client = Client([response("{}"), response(VALID.replace("tr-1", "unknown")), response()])
     provider = DeepSeekProvider(Config(max_retries=2), Events(tmp_path), client)
     assert provider.compose(packet(), []).blocks[0].evidence_ids == ["tr-1"]
