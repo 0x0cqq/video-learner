@@ -63,8 +63,8 @@ def contained(root: Path, relative: str | Path) -> Path:
     return target
 
 
-def output_path(source: Path, output: Path) -> Path:
-    """返回新的绝对输出目录，拒绝与素材目录相同或互为祖先的路径。
+def output_path(source: Path, output: Path, *, force: bool = False) -> Path:
+    """解析绝对输出目录，拒绝与素材目录相同或互为祖先的路径。
 
     单文件输入也保护其整个父目录，防止生成产物混入素材或覆盖已有输出。
     """
@@ -73,9 +73,16 @@ def output_path(source: Path, output: Path) -> Path:
     except OSError as exc:
         raise InputError("素材路径不存在或不可读") from exc
     root = source if source.is_dir() else source.parent
+    if force and (output.is_symlink() or output.is_junction()):
+        raise InputError("强制覆盖不接受符号链接或目录联接，请指定实际输出目录")
     target = output.resolve()
     if target == root or target.is_relative_to(root) or root.is_relative_to(target):
         raise InputError("输出目录不能与源目录重叠")
-    if target.exists():
-        raise InputError("输出目录已存在；请指定新的独立目录")
+    if force:
+        if target == target.parent or Path.cwd().resolve().is_relative_to(target):
+            raise InputError("不能强制覆盖磁盘根目录、当前工作目录或其上级目录")
+        if target.exists() and not target.is_dir():
+            raise InputError("输出路径已存在且不是目录")
+    elif target.exists():
+        raise InputError("输出目录已存在；请指定新目录，或用 -f 删除原目录后重新转换")
     return target

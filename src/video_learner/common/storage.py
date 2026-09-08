@@ -9,6 +9,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import RLock
 
 from video_learner.common.core import InputError, contained
 
@@ -43,9 +44,10 @@ def atomic_bytes(path: Path, content: bytes) -> None:
 
 
 def write_json(path: Path, value: object) -> None:
-    """将完整 JSON 编码并回读验证后原子写入，避免留下只写了一部分的清单。"""
-    payload = json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8") + b"\n"
-    json.loads(payload)
+    """拒绝非有限数值，完整编码 JSON 后原子写入；编码失败不改动目标文件。"""
+    payload = (
+        json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8") + b"\n"
+    )
     atomic_bytes(path, payload)
 
 
@@ -93,7 +95,7 @@ def directory_lock(path: Path):
 
 
 class Events:
-    def __init__(self, root: Path, progress: Callable[[str], None] | None = None):
+    def __init__(self, root: Path, progress: Callable[[dict], None] | None = None):
         """为本次操作建立独立运行 ID 和单调时钟，追加日志而不改写已有记录。"""
         self.path = contained(root, ".work/logs/events.jsonl")
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -101,8 +103,14 @@ class Events:
         self.run_id = uuid.uuid4().hex
         self.started = time.monotonic()
         self.usage_events: list[dict] = []
+        self._lock = RLock()
 
     def emit(self, stage: str, status: str, **details) -> None:
+        """串行记录事件及调用终端回调，防止并发请求交错写日志或更新显示。"""
+        with self._lock:
+            self._emit(stage, status, **details)
+
+    def _emit(self, stage: str, status: str, **details) -> None:
         """追加带 UTC 与运行内相对时间的事件；details 须由调用方筛除凭据和原始异常。"""
         record = {
             "stage": stage,
@@ -118,9 +126,7 @@ class Events:
         # 这里只序列化受控字段，不负责从供应商原始错误或 URL 中自动剔除敏感值。
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self.progress(
-            f"{stage}：{status}" + (f" ({details['seconds']:.1f}s)" if "seconds" in details else "")
-        )
+        self.progress(record)
 
     @contextmanager
     def stage(self, name: str):

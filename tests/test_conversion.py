@@ -66,10 +66,93 @@ def test_offline_conversion_exports_references_and_versions(converted):
     portable = (root / "source.json").read_text(encoding="utf-8")
     assert str(Path.cwd()) not in portable
     assert "secret_file" not in json.dumps(manifest)
+    events = [
+        json.loads(line)
+        for line in (root / ".work/logs/events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    for stage in ("scan_frames", "save_frames", "compose"):
+        last = [
+            event for event in events if event["stage"] == stage and event["status"] == "progress"
+        ][-1]
+        assert last["completed"] == last["total"] > 0
+    summary = next(e for e in events if e["stage"] == "compose" and e["status"] == "completed")
+    assert summary["chapters"] == len(book.chapters)
+    assert summary["figures"] == sum(b.kind == "figure" for c in book.chapters for b in c.blocks)
+    assert summary["failed"] == 0 and summary["seconds"] >= 0
     assert "来源：" not in data.decode()
     assert "**原课整理" not in data.decode()
     sources = (root / "sources.md").read_text(encoding="utf-8")
     assert "blk-001-001" in sources and "tr-000001" in sources
+
+
+def test_force_cli_replaces_old_output(converted, monkeypatch):
+    """显式 -f 删除整个旧输出并完成新转换；没有该参数时旧内容必须保留。"""
+    from typer.testing import CliRunner
+
+    from video_learner.cli import app
+    from video_learner.common.core import InputError
+
+    root, video = converted
+    old = root / "manual.txt"
+    old.write_text("旧手改", encoding="utf-8")
+    with pytest.raises(InputError):
+        convert(
+            video,
+            root,
+            Config(),
+            subtitle=video.with_suffix(".srt"),
+            provider=DeterministicProvider(),
+        )
+    assert old.read_text(encoding="utf-8") == "旧手改"
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "video_learner.workflows.conversion.create_provider",
+        lambda config, events: DeterministicProvider(),
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "convert",
+            str(video),
+            "--output",
+            str(root),
+            "--subtitle",
+            str(video.with_suffix(".srt")),
+            "-f",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert not old.exists()
+    assert (root / "notes.md").is_file()
+
+
+def test_force_preserves_output_when_preflight_or_lock_fails(converted):
+    """参数错误或目标目录正在使用时，强制选项也不能提前删除旧结果。"""
+    from video_learner.common.core import InputError
+    from video_learner.common.storage import directory_lock
+
+    root, video = converted
+    old = (root / "notes.md").read_bytes()
+    with pytest.raises(InputError):
+        convert(
+            video,
+            root,
+            Config(),
+            end_us=0,
+            force=True,
+            subtitle=video.with_suffix(".srt"),
+            provider=DeterministicProvider(),
+        )
+    with directory_lock(root.parent / f".{root.name}.lock"), pytest.raises(InputError):
+        convert(
+            video,
+            root,
+            Config(),
+            force=True,
+            subtitle=video.with_suffix(".srt"),
+            provider=DeterministicProvider(),
+        )
+    assert (root / "notes.md").read_bytes() == old
 
 
 def test_optional_caption_preserves_figure_and_rejects_empty_text(converted):

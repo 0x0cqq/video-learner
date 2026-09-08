@@ -12,11 +12,24 @@ from video_learner.cli import main
 from video_learner.common.config import Config
 from video_learner.common.core import InputError, TaskError, contained
 from video_learner.common.schemas import Notebook
+from video_learner.common.storage import write_json
 from video_learner.media.evidence import audio_window
 from video_learner.media.io import extract_frame, inspect_source
 from video_learner.notes.composition import validate_notebook
 from video_learner.workflows.conversion import convert
 from video_learner.workflows.revision import revise
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_json_rejects_nonfinite_without_replacing_file(tmp_path, value):
+    """非标准 JSON 数值必须在写入前失败，保留已有文件且不留下临时文件。"""
+    path = tmp_path / "record.json"
+    original = b'{"value": 1}\n'
+    path.write_bytes(original)
+    with pytest.raises(ValueError):
+        write_json(path, {"value": value})
+    assert path.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [path]
 
 
 def test_separate_audio_and_video_offsets_share_video_origin(video, tmp_path):

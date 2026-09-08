@@ -100,7 +100,7 @@ def evidence_packet(
             ),
             None,
         ),
-        "frames": [{"id": f.id, "at_us": f.at_us, "crop": f.crop} for f in frames],
+        "frames": [{"id": f.id, "at_us": f.at_us} for f in frames],
         "current_markdown": current_markdown,
         "target_ids": target_ids,
     }
@@ -190,7 +190,7 @@ def compose_chapter(
 def validate_notebook(book: Notebook, root: Path) -> None:
     """机械校验整份讲义的时间覆盖、唯一 ID、证据引用及缓存图片完整性。
 
-    同时核对图片 PTS 与规范时间；历史未记录哈希的图片仍检查存在性和可解码性。
+    同时核对图片 PTS 与规范时间、文件哈希和可解码性。
     """
     if not 0 <= book.start_us < book.end_us <= book.source.duration_us:
         raise TaskError("文档范围越界")
@@ -206,20 +206,16 @@ def validate_notebook(book: Notebook, root: Path) -> None:
             raise TaskError("图像证据时间越界或 ID 重复")
         if int(frame.pts * Fraction(frame.time_base) * US) - frame.origin_us != frame.at_us:
             raise TaskError("图像 PTS 与实际时间不一致")
-        for relative, expected_hash in (
-            (frame.path, frame.sha256),
-            (frame.original_path, frame.original_sha256),
-        ):
-            path = contained(root, relative)
-            if not path.is_file():
-                raise TaskError("图像证据资源缺失")
-            if expected_hash is not None and digest(path) != expected_hash:
-                raise TaskError("图像证据缓存内容已改变，请重新转换到独立目录")
-            try:
-                with Image.open(path) as image:
-                    image.verify()
-            except (OSError, ValueError) as exc:
-                raise TaskError("图像证据缓存损坏") from exc
+        path = contained(root, frame.path)
+        if not path.is_file():
+            raise TaskError("图像证据资源缺失")
+        if digest(path) != frame.sha256:
+            raise TaskError("图像证据缓存内容已改变，请重新转换到独立目录")
+        try:
+            with Image.open(path) as image:
+                image.verify()
+        except (OSError, ValueError) as exc:
+            raise TaskError("图像证据缓存损坏") from exc
         evidence[frame.id] = frame
     expected_start = book.start_us
     identities = set()

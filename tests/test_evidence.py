@@ -20,7 +20,7 @@ def test_audio_resampling_preserves_silence_and_clip_offset(video):
 
 
 def test_subtitles_clipping_coverage_and_invalid_times(tmp_path):
-    """裁剪字幕时保留原时间，并按实际交集计算覆盖率；越界字幕不能静默导入。"""
+    """取字幕时间交集时保留原时间，并按实际交集计算覆盖率；越界字幕不能静默导入。"""
     subtitle = tmp_path / "lesson.srt"
     subtitle.write_text("1\n00:20:00,000 --> 00:20:03,000\n原始字幕\n", encoding="utf-8")
     segments, report = load_subtitles(subtitle, 1_201_000_000, 1_204_000_000, 1_210_000_000)

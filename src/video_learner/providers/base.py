@@ -174,7 +174,7 @@ class DeepSeekProvider:
         for identity, path in images:
             total_image_bytes += path.stat().st_size
             if total_image_bytes > 25_000_000:
-                raise TaskError("单次图像证据超过 25 MB，请减少候选图或指定 ROI")
+                raise TaskError("单次图像证据超过 25 MB，请减少候选图数量")
             encoded = base64.b64encode(path.read_bytes()).decode("ascii")
             content.extend(
                 [
@@ -250,6 +250,12 @@ class DeepSeekProvider:
                     if attempt == self.config.max_retries:
                         raise
                     repair = f"上次响应未通过语义校验：{exc}。请严格修复并重新输出完整 JSON。"
+                    self.events.emit(
+                        "model_call",
+                        "retrying",
+                        attempt=attempt + 1,
+                        max_retries=self.config.max_retries,
+                    )
                     continue
                 self.events.emit("model_call", "completed", call=self.calls)
                 return draft
@@ -301,6 +307,9 @@ class DeepSeekProvider:
                 raise TaskError("模型流式服务报告错误，本次请求未完成且不自动重试") from None
             if attempt == self.config.max_retries:
                 raise TaskError("模型请求失败，已达到重试上限；超时请求仍可能产生用量")
+            self.events.emit(
+                "model_call", "retrying", attempt=attempt + 1, max_retries=self.config.max_retries
+            )
             time.sleep(min(2**attempt, 4))
         raise TaskError("模型请求失败")
 

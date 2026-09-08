@@ -90,7 +90,7 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
     """只读探测单视频或单课时缓存，以视频轨道起点建立规范时间线。
 
     默认只探测轨道；decode 抽查解码，full 顺序解码并核对声明时长。
-    元数据完成标记、媒体可打开和解码验证分别记录，诊断不等同于全片可用。
+    opened 表示所有候选媒体均打开并完成轨道探测，与元数据、轨道齐全及解码结果分开。
     """
     path = path.resolve()
     if not path.exists():
@@ -118,6 +118,7 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
     else:
         files = [path]
     tracks = []
+    opened = True
     for file in files:
         # 联合文件头与媒体扩展名筛选，避免把缓存封面和元数据当作课程视频。
         with file.open("rb") as handle:
@@ -165,6 +166,7 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
                         )
                     )
         except (av.FFmpegError, InputError, OSError) as exc:
+            opened = False
             diagnostics.append(f"{file.name}：媒体无法打开或轨道损坏 ({type(exc).__name__})")
     videos = [t for t in tracks if t.kind == "video"]
     audios = [t for t in tracks if t.kind == "audio"]
@@ -192,6 +194,7 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
         origin_us=video.start_us,
         subtitles=subtitles,
         metadata_complete=complete,
+        opened=opened,
         diagnostics=diagnostics,
         bvid=bvid,
     )
@@ -270,18 +273,3 @@ def extract_frame(
                     raise TaskError("目标画面损坏")
                 return frame.to_image(), actual, frame.pts
     raise TaskError("请求区间没有可用视频帧")
-
-
-def crop_image(image: Image.Image, crop: tuple[int, int, int, int] | None) -> Image.Image:
-    """按原帧像素裁剪，越界直接报错；没有裁剪要求时返回原图对象。"""
-    if crop is None:
-        return image
-    x, y, width, height = crop
-    if (
-        min(x, y) < 0
-        or min(width, height) <= 0
-        or x + width > image.width
-        or y + height > image.height
-    ):
-        raise InputError("裁剪区域越界；坐标为原帧像素 x,y,width,height")
-    return image.crop((x, y, x + width, y + height))

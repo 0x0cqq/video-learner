@@ -3,6 +3,7 @@
 provider = "deepseek" # 改为 qwen 时，自动选择 qwen3.8-flash / DASHSCOPE_API_KEY。
 # model = "deepseek-v4-flash-vision-exp" # 可显式覆盖所选供应商的默认模型。
 # api_key_env = "DEEPSEEK_API_KEY"
+# secret_file = "secrets/deepseek.secret" # 文件优先于环境变量；路径相对于运行目录。
 profile = "mixed"
 instruction = "保留关键概念、推导与操作步骤，压缩重复说明"
 allow_ai_additions = false
@@ -10,14 +11,15 @@ allow_ai_additions = false
 asr_language = "zh"
 asr_qwen_model = "qwen3-asr-flash"
 asr_api_key_env = "DASHSCOPE_API_KEY"
+# asr_secret_file = "secrets/aliyun.secret" # 同上；仅配置文件路径，不填写密钥值。
 asr_window_seconds = 30 # 每片上限；末尾附近有停顿时提前切分，无句级时间戳。
 asr_max_calls = 500
+jobs = 1 # 仅 ASR 请求并发，范围 1–32；CLI --jobs 优先，图文整理保持串行。
 
 sample_seconds = 2 # 明显切屏保留前一帧，另补周期帧和末帧。
 chapter_seconds = 180 # 目标章长，尽量对齐附近转写边界。
 max_images_per_chapter = 12
 image_change_threshold = 0.035
-# crop = [640, 0, 640, 410]
 
 reasoning_effort = "none"
 qwen_enable_thinking = true

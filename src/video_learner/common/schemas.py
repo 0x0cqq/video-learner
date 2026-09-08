@@ -35,7 +35,7 @@ class Source(Record):
     origin_us: int
     subtitles: list[str] = Field(default_factory=list)
     metadata_complete: bool | None = None
-    opened: bool = True
+    opened: bool = True  # 所有候选媒体均打开并完成轨道探测；不代表轨道齐全或解码通过。
     sampled_decode: bool = False
     full_verified: bool = False
     diagnostics: list[str] = Field(default_factory=list)
@@ -62,11 +62,7 @@ class FrameEvidence(Record):
     time_base: str
     origin_us: int
     path: str
-    original_path: str
-    crop: tuple[int, int, int, int] | None = None
-    parent_id: str | None = None
-    sha256: str | None = None
-    original_sha256: str | None = None
+    sha256: str
 
 
 class ReviewItem(Record):
@@ -107,7 +103,7 @@ class Chapter(Record):
 
 
 class Notebook(Record):
-    schema_version: int = 1
+    schema_version: Literal[2] = 2
     title: str
     start_us: int
     end_us: int

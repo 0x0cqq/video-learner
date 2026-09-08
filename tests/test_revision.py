@@ -12,75 +12,50 @@ from video_learner.notes.rendering import image_dependencies, locate
 from video_learner.workflows.revision import revise
 
 
-def test_legacy_figure_source_moves_outside_text(converted):
-    """旧图块迁出来源行时保留手改图注；来源行本身已被修改则仍报告冲突。"""
+def test_image_replacement_preserves_user_caption_and_extra_text(converted):
+    """换图只修改受控图片行；手改图注与附加来源说明逐字节保留，手改图片行则冲突。"""
     from video_learner.notes.rendering import AnchorConflict, render_block
     from video_learner.workflows.revision import replace_figure
 
     root, _ = converted
     book = Notebook.model_validate_json((root / "notes.json").read_text(encoding="utf-8"))
     block = book.chapters[0].blocks[1]
-    rendered = render_block(block, book)
-    old_source = "> 来源：00:00:00（1 条证据，关联见 notes.json）\n".encode()
-    original = rendered.replace(b"<!-- vl:end block", old_source + b"<!-- vl:end block")
-    current = original.replace(block.body.encode(), "手改图注必须保留".encode())
+    original = render_block(block, book)
+    extra = "> 用户附注：请核对原视频。\r\n".encode()
+    current = original.replace(block.body.encode(), "手改图注必须保留".encode()) + extra
     updated = replace_figure(current, original, block, book)
-    assert "手改图注必须保留" in updated.decode()
-    assert "来源：" not in updated.decode()
+    assert updated == current
     with pytest.raises(AnchorConflict, match="已有手改"):
-        replace_figure(
-            current.replace(old_source, old_source.replace(b"00:00:00", b"00:00:01")),
-            original,
-            block,
-            book,
-        )
+        replace_figure(current.replace(b"![", b"![changed", 1), original, block, book)
 
 
-@pytest.mark.parametrize(
-    "provider,mode", [("local", "standard"), ("local", "fast"), ("qwen", "standard")]
-)
-def test_legacy_asr_manifest_remains_revisable(converted, provider, mode):
-    """重建旧版 standard、fast 及 Qwen 清单指纹，验证兼容读取仍会拒绝原配置被篡改。"""
-    from video_learner.common.storage import canonical_hash
-    from video_learner.workflows.conversion import EXTRACTION_FIELDS
-    from video_learner.workflows.revision import baseline_config
-
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_old_extraction_versions_are_rejected_without_writing(converted, version):
+    """旧提取版本不自动迁移或发布修订，原稿和已登记的版本保持不变。"""
     root, _ = converted
     path = root / ".work/manifest.json"
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    manifest.pop("extraction_version")
-    settings = manifest["config"]
-    settings.update(
-        asr_model="small",
-        asr_compute_type="int8",
-        asr_provider=provider,
-        asr_mode=mode,
-        audio_chunk_seconds=120,
-        audio_overlap_seconds=2,
-    )
-    old_fields = EXTRACTION_FIELDS | {
-        "asr_model",
-        "asr_compute_type",
-        "asr_provider",
-        "asr_mode",
-        "audio_chunk_seconds",
-        "audio_overlap_seconds",
-    }
-    values = {k: v for k, v in settings.items() if k in old_fields}
-    if mode == "standard":
-        values.pop("asr_mode")
-    if provider == "local":
-        for key in ("asr_provider", "asr_qwen_model", "asr_window_seconds"):
-            values.pop(key)
-    manifest["extraction_hash"] = canonical_hash(values)
+    manifest["extraction_version"] = version
     path.write_text(json.dumps(manifest), encoding="utf-8")
     before = (root / "notes.md").read_bytes()
-    revised = revise(root, block="fig-001-002", at_us=1_000_000)
-    assert (revised / "notes.md").is_file()
+    with pytest.raises(InputError, match="版本不兼容"):
+        revise(root, block="fig-001-002", at_us=1_000_000)
     assert (root / "notes.md").read_bytes() == before
-    manifest["config"]["asr_model"] = "changed"
-    with pytest.raises(InputError, match="指纹"):
-        baseline_config(manifest)
+    assert json.loads(path.read_text(encoding="utf-8")) == manifest
+    assert not (root / "revisions").exists()
+
+
+def test_old_schema_is_rejected_before_loading_index(converted):
+    """索引结构变更后通过清单版本给出可操作错误，不触碰旧数据或读取旧字段。"""
+    root, _ = converted
+    path = root / ".work/manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 1
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(InputError, match="重新转换到独立目录"):
+        revise(root, block="fig-001-002", at_us=1_000_000)
+    assert json.loads(path.read_text(encoding="utf-8")) == manifest
+    assert not (root / "revisions").exists()
 
 
 def test_text_revision_preserves_current_bytes_and_user_assets(converted):
@@ -126,23 +101,24 @@ def test_text_revision_preserves_current_bytes_and_user_assets(converted):
 
 
 def test_exact_image_revision_needs_no_provider_and_is_portable(converted, tmp_path, monkeypatch):
-    """无模型凭据执行换帧，再复制版本并以其为新基线裁剪，核对实际时间及版本关系。"""
+    """无模型凭据执行换帧，再复制版本并以其为新基线换帧，核对完整画面和版本关系。"""
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     root, _ = converted
     before = (root / "notes.md").read_bytes()
-    destination = revise(root, block="fig-001-002", at_us=2_250_000, crop=(10, 10, 40, 30))
+    destination = revise(root, block="fig-001-002", at_us=2_250_000)
     revised = (destination / "notes.md").read_bytes()
     assert b"00:00:02" in revised
     book = Notebook.model_validate_json((destination / "notes.json").read_text(encoding="utf-8"))
     frame = next(f for f in book.frames if f.id.startswith("frame-r002"))
     assert frame.at_us == 2_300_000
-    assert frame.crop == (10, 10, 40, 30)
+    with Image.open(root / frame.path) as image:
+        assert image.size == (160, 96)
     assert (root / "notes.md").read_bytes() == before
     portable = tmp_path / "portable"
     shutil.copytree(destination, portable)
     for reference in image_dependencies((portable / "notes.md").read_bytes()):
         assert (portable / reference).is_file()
-    third = revise(root, base="r002", block="fig-001-002", crop=(0, 0, 80, 40))
+    third = revise(root, base="r002", block="fig-001-002", at_us=1_500_000)
     assert third.name == "r003"
     manifest = json.loads((root / ".work/manifest.json").read_text(encoding="utf-8"))
     assert manifest["versions"]["r003"]["base"] == "r002"

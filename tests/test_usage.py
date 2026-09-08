@@ -10,12 +10,15 @@ from video_learner.common.usage import request_cost, summarize_usage
 from video_learner.workflows.conversion import convert
 
 
-def test_retry_usage_and_unknown_request_are_not_free():
+@pytest.mark.parametrize("provider", ["deepseek", "qwen"])
+def test_retry_usage_and_unknown_request_are_not_free(provider):
     """修复失败的响应仍计费，断线未知用量不当作零；ASR 秒数与图文 token 分别计价。"""
     config = Config(
-        provider="qwen",
+        provider=provider,
         prices={
-            "qwen:qwen3.8-flash": ModelPrice(input_per_million=2, output_per_million=8),
+            f"{provider}:{Config(provider=provider).model}": ModelPrice(
+                input_per_million=2, output_per_million=8
+            ),
             "qwen:qwen3-asr-flash": ModelPrice(audio_per_second=0.01),
         },
     )
@@ -40,6 +43,10 @@ def test_retry_usage_and_unknown_request_are_not_free():
         },
     ]
     report = summarize_usage(records, config)
+    assert [(row["provider"], row["model"]) for row in report["models"]] == [
+        (provider, config.model),
+        ("qwen", config.asr_qwen_model),
+    ]
     assert report["input_tokens"] == 1400
     assert report["output_tokens"] == 130
     assert report["estimated_known_cost"]["CNY"] == pytest.approx(0.2028)

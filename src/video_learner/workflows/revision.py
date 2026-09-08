@@ -37,44 +37,22 @@ from video_learner.notes.rendering import (
 )
 from video_learner.providers.base import Provider, create_provider
 from video_learner.workflows.conversion import (
-    EXTRACTION_FIELDS,
     extraction_hash,
     fingerprint_source,
 )
 
 
 def baseline_config(manifest: dict) -> Config:
-    """先按清单记录的指纹版本验证提取配置，再加载修订仍需的设置。
-
-    旧版包含已移除的本地 ASR 字段，须按旧规则校验后再剔除，不能用新默认值重算旧指纹。
-    """
+    """加载当前版本的提取设置并核对指纹；不迁移旧工作目录。"""
+    if manifest.get("extraction_version") != 4:
+        raise InputError("提取数据版本不兼容，请重新转换到独立目录")
     settings = manifest.get("config")
     if not isinstance(settings, dict):
         raise InputError("工作清单配置无效")
-    obsolete = {
-        "asr_model",
-        "asr_compute_type",
-        "asr_mode",
-        "asr_provider",
-        "audio_chunk_seconds",
-        "audio_overlap_seconds",
-    }
-    version = manifest.get("extraction_version", 1)
-    if version == 1:
-        fields = {k: v for k, v in settings.items() if k in EXTRACTION_FIELDS | obsolete}
-        if fields.get("asr_mode", "standard") == "standard":
-            fields.pop("asr_mode", None)
-        if fields.get("asr_provider", "local") == "local":
-            for key in ("asr_provider", "asr_qwen_model", "asr_window_seconds"):
-                fields.pop(key, None)
-        expected = canonical_hash(fields)
-    elif version in (2, 3):
-        expected = extraction_hash(load_config(**settings))
-    else:
-        raise InputError("不支持的提取指纹版本")
-    if expected != manifest.get("extraction_hash"):
+    config = load_config(**settings)
+    if extraction_hash(config) != manifest.get("extraction_hash"):
         raise InputError("提取配置指纹不一致，请恢复原工作清单")
-    return load_config(**{k: v for k, v in settings.items() if k not in obsolete})
+    return config
 
 
 def conflict_report(root: Path, message: str, suggestion: bytes = b"") -> Path:
@@ -103,7 +81,7 @@ def load_baseline(root: Path, base: str) -> tuple[dict, Path, Notebook, bytes]:
     if not re.fullmatch(r"r\d{3,}", base):
         raise InputError("基线版本格式为 r001、r002 等")
     manifest = read_json(contained(root, ".work/manifest.json"))
-    if manifest.get("schema_version") != 1 or manifest.get("status") != "completed":
+    if manifest.get("schema_version") != 2 or manifest.get("status") != "completed":
         raise InputError("此工作目录不是兼容的完整转换结果；请重新转换到独立目录")
     versions = manifest.get("versions", {})
     if (
@@ -142,11 +120,10 @@ def revise(
     block: str | None = None,
     instruction: str | None = None,
     at_us: int | None = None,
-    crop: tuple[int, int, int, int] | None = None,
     config_path: Path | None = None,
     secret: Path | None = None,
     allow_ai_additions: bool | None = None,
-    progress: Callable[[str], None] | None = None,
+    progress: Callable[[dict], None] | None = None,
     provider: Provider | None = None,
     model_provider: str | None = None,
     model: str | None = None,
@@ -159,9 +136,9 @@ def revise(
     """
     if (section is None) == (block is None):
         raise InputError("须且只能选择 --section 或 --block")
-    image_operation = at_us is not None or crop is not None
+    image_operation = at_us is not None
     if image_operation and (section or instruction):
-        raise InputError("精确换图/裁剪只接受 --block，不能同时指定文字修订要求")
+        raise InputError("精确换图只接受 --block，不能同时指定文字修订要求")
     if not image_operation and not (instruction and instruction.strip()):
         raise InputError("文字修订必须提供 --instruction")
     root = workdir.resolve()
@@ -250,19 +227,15 @@ def revise(
             with events.stage(f"revise:{revision_id}"):
                 if image_operation:
                     old_frame = frame_of(book, target_block.frame_id)
-                    requested = old_frame.at_us if at_us is None else at_us
-                    selected_crop = old_frame.crop if crop is None else crop
-                    if not book.start_us <= requested < book.end_us:
+                    if not book.start_us <= at_us < book.end_us:
                         raise InputError("替换帧须在当前转换范围内；其他区间请独立转换")
                     new_frame = register_frame(
                         source_path,
                         source,
-                        requested,
+                        at_us,
                         book.end_us,
                         root,
                         f"frame-{revision_id}-{target_block.id}",
-                        selected_crop,
-                        parent_id=old_frame.id,
                     )
                     book.frames.append(new_frame)
                     target_block.frame_id = new_frame.id
@@ -280,7 +253,7 @@ def revise(
                     )
                     book.review.append(
                         ReviewItem(
-                            reason="已按指定帧/裁剪更新图片；原图注及相关文字保留，请核对图文一致性",
+                            reason="已按指定帧更新图片；原图注及相关文字保留，请核对图文一致性",
                             start_us=target_chapter.start_us,
                             end_us=target_chapter.end_us,
                             block_id=target_block.id,
@@ -310,9 +283,7 @@ def revise(
                     if target_block and target_block.kind == "figure":
                         # 图注修订固定原图，不能让模型借此执行 P1 的自然语言重新选图。
                         pinned = frame_of(book, target_block.frame_id)
-                        packet["frames"] = [
-                            {"id": pinned.id, "at_us": pinned.at_us, "crop": pinned.crop}
-                        ]
+                        packet["frames"] = [{"id": pinned.id, "at_us": pinned.at_us}]
                         images = [(pinned.id, contained(root, pinned.path))]
                     draft = active_provider.compose(packet, images)
                     validate_draft(draft, packet)
@@ -374,7 +345,7 @@ def revise(
                 stage_assets(book, root, staging, baseline)
                 copy_dependencies(new_current, baseline, staging)
                 export_book(book, root, staging, new_current)
-                request_summary = instruction or f"指定帧/裁剪 {at_us} / {crop}"
+                request_summary = instruction or f"指定帧 {at_us}"
                 atomic_bytes(
                     contained(staging, "changes.md"),
                     (
@@ -422,29 +393,21 @@ def revise(
 
 
 def replace_figure(current: bytes, original: bytes, block: NoteBlock, book: Notebook) -> bytes:
-    """仅替换渲染器拥有的图片行和来源行，逐字节保留手改图注及原有换行格式。
+    """仅替换受控图片行，逐字节保留手改图注、附加文字及原有换行格式。
 
-    受控行必须仍与生成快照一致；缺失、重复或手改均报告冲突，不猜测用户意图。
+    图片行必须仍与生成快照一致；缺失、重复或手改均报告冲突，不猜测用户意图。
     """
     current_lines = current.splitlines(keepends=True)
     original_lines = original.splitlines(keepends=True)
     rendered_lines = render_block(block, book).splitlines(keepends=True)
-    for prefix in (b"![", "> 来源：".encode()):
-        old = [line for line in original_lines if line.startswith(prefix)]
-        new = [line for line in rendered_lines if line.startswith(prefix)]
-        existing = [i for i, line in enumerate(current_lines) if line.startswith(prefix)]
-        if prefix != b"![" and not old and not existing:
-            continue
-        # 旧版来源行随换图移至 sources.md；已有手改仍须先检查，不能静默删除。
-        removing = prefix != b"![" and not new
-        if len(old) != 1 or (len(new) != 1 and not removing) or len(existing) != 1:
-            raise AnchorConflict("图片块的受控图片/来源行缺失或重复")
-        index = existing[0]
-        if current_lines[index].rstrip(b"\r\n") != old[0].rstrip(b"\r\n"):
-            raise AnchorConflict("图片块的受控图片/来源行已有手改，不能自动替换；请手工合并建议")
-        if removing:
-            current_lines.pop(index)
-            continue
-        ending = b"\r\n" if current_lines[index].endswith(b"\r\n") else b"\n"
-        current_lines[index] = new[0].rstrip(b"\r\n") + ending
+    old = [line for line in original_lines if line.startswith(b"![")]
+    new = [line for line in rendered_lines if line.startswith(b"![")]
+    existing = [i for i, line in enumerate(current_lines) if line.startswith(b"![")]
+    if len(old) != 1 or len(new) != 1 or len(existing) != 1:
+        raise AnchorConflict("图片块的受控图片行缺失或重复")
+    index = existing[0]
+    if current_lines[index].rstrip(b"\r\n") != old[0].rstrip(b"\r\n"):
+        raise AnchorConflict("图片块的受控图片行已有手改，不能自动替换；请手工合并建议")
+    ending = b"\r\n" if current_lines[index].endswith(b"\r\n") else b"\n"
+    current_lines[index] = new[0].rstrip(b"\r\n") + ending
     return b"".join(current_lines)

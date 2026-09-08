@@ -1,6 +1,8 @@
 """P0 用例编排；CLI 仅转换参数并展示阶段事件。"""
 
 import hashlib
+import shutil
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -18,7 +20,7 @@ from video_learner.common.storage import (
 )
 from video_learner.common.usage import summarize_usage
 from video_learner.media.evidence import load_subtitles, sample_frames, save_transcript
-from video_learner.media.io import crop_image, extract_frame, inspect_source, source_file, track_of
+from video_learner.media.io import inspect_source, source_file, track_of
 from video_learner.notes.composition import compose_chapter, plan_chapters, validate_notebook
 from video_learner.notes.rendering import export_book, render_notes
 from video_learner.providers.asr import transcribe_qwen, validate_qwen_config
@@ -37,7 +39,6 @@ EXTRACTION_FIELDS = {
     "chapter_seconds",
     "max_images_per_chapter",
     "image_change_threshold",
-    "crop",
 }
 
 
@@ -63,25 +64,24 @@ def convert(
     start_us: int = 0,
     end_us: int | None = None,
     subtitle: Path | None = None,
-    progress: Callable[[str], None] | None = None,
+    progress: Callable[[dict], None] | None = None,
     provider: Provider | None = None,
     usage_report: Callable[[dict], None] | None = None,
+    force: bool = False,
 ) -> Path:
     """编排单视频转换，在独占锁内提取证据、组织章节并提交新输出目录。
 
     输入与凭据预检通过后才创建工作目录；仅全部章节完成才登记 r001。
+    force 在预检通过并持锁后删除原输出；后续转换失败不会恢复被删除的旧结果。
     失败保留诊断产物并抛异常，这些文件不代表可恢复任务或可修订的成功版本。
     """
     source_path = source_path.resolve()
-    target = output_path(source_path, output)
+    target = output_path(source_path, output, force=force)
     source = inspect_source(source_path)
     if source.diagnostics:
         raise InputError("素材检查发现问题：" + "；".join(source.diagnostics))
     track_of(source, "audio")
     start_us, end_us = time_range(start_us, end_us, source.duration_us)
-    if config.crop:
-        image, _, _ = extract_frame(source_path, source, start_us, end_us)
-        crop_image(image, config.crop)
     subtitle_segments = None
     subtitle_report = None
     if subtitle:
@@ -96,20 +96,36 @@ def convert(
         validate_provider_config(config)
     if subtitle_segments is None:
         validate_qwen_config(config, start_us, end_us)
+    if force:
+        for dependency in (subtitle, config.secret_file, config.asr_secret_file):
+            if dependency and Path(dependency).resolve().is_relative_to(target):
+                raise InputError("字幕或凭据文件位于输出目录内，不能强制删除")
     # 锁放在输出目录旁，既不提前创建输出，也能与后续 revise 使用同一把锁。
     lock_path = target.parent / f".{target.name}.lock"
     with directory_lock(lock_path):
+        # 删除前重新解析并校验同一个绝对目标，防止等待锁期间路径被替换。
+        if output_path(source_path, output, force=force) != target:
+            raise InputError("输出路径在预检后发生变化，停止转换")
         if target.exists():
-            raise InputError("输出目录已存在，请使用新目录")
+            if not force:
+                raise InputError("输出目录已存在；请指定新目录，或用 -f 删除后重跑")
+            shutil.rmtree(target)
         staging = target.parent / f".{target.name}.{uuid.uuid4().hex}.partial"
         staging.mkdir(parents=True, exist_ok=False)
         events = Events(staging, progress)
+        events.emit(
+            "conversion_plan",
+            "ready",
+            chapter_seconds=config.chapter_seconds,
+            asr_window_seconds=config.asr_window_seconds,
+            uses_subtitles=subtitle_segments is not None,
+        )
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "status": "running",
             "source_hash": None,
             "extraction_hash": extraction_hash(config),
-            "extraction_version": 3,
+            "extraction_version": 4,
             "prompt_version": PROMPT_VERSION,
             "config": config.model_dump(exclude={"secret_file", "asr_secret_file"}),
             "range": [start_us, end_us],
@@ -182,13 +198,25 @@ def convert(
                         )
                     )
             with events.stage("sample"):
-                book.frames = sample_frames(source_path, source, start_us, end_us, config, staging)
+                book.frames = sample_frames(
+                    source_path, source, start_us, end_us, config, staging, events
+                )
             with events.stage("plan_chapters"):
                 book.chapters = plan_chapters(start_us, end_us, config, book.transcript)
+                events.emit("chapter_plan", "ready", chapters=len(book.chapters))
                 manifest["chapters"] = [c.model_dump() for c in book.chapters]
                 write_json(contained(staging, ".work/manifest.json"), manifest)
             active_provider = provider or create_provider(config, events)
-            for chapter in book.chapters:
+            compose_started = time.monotonic()
+            for index, chapter in enumerate(book.chapters, 1):
+                events.emit(
+                    "compose",
+                    "progress",
+                    total=len(book.chapters),
+                    completed=sum(c.status == "completed" for c in book.chapters),
+                    failed=sum(c.status == "failed" for c in book.chapters),
+                    detail=f"第 {index} 章",
+                )
                 try:
                     with events.stage(f"compose:{chapter.id}"):
                         compose_chapter(book, chapter, config, staging, active_provider)
@@ -206,6 +234,21 @@ def convert(
                 manifest["chapters"] = [c.model_dump() for c in book.chapters]
                 write_json(contained(staging, ".work/manifest.json"), manifest)
                 write_json(contained(staging, ".work/composed.json"), book.model_dump())
+            events.emit(
+                "compose",
+                "progress",
+                total=len(book.chapters),
+                completed=sum(c.status == "completed" for c in book.chapters),
+                failed=sum(c.status == "failed" for c in book.chapters),
+            )
+            events.emit(
+                "compose",
+                "completed" if all(c.status == "completed" for c in book.chapters) else "partial",
+                seconds=time.monotonic() - compose_started,
+                chapters=sum(c.status == "completed" for c in book.chapters),
+                failed=sum(c.status == "failed" for c in book.chapters),
+                figures=sum(b.kind == "figure" for c in book.chapters for b in c.blocks),
+            )
             with events.stage("validate_export"):
                 validate_notebook(book, staging)
                 export_book(book, staging, staging)

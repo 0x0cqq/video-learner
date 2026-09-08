@@ -47,7 +47,7 @@ def summarize_usage(records: list[dict], config: Config) -> dict:
         item.update(record)
     groups = {}
     for (asr, _), usage in requests.items():
-        provider = usage.get("provider", "qwen" if asr else config.provider)
+        provider = "qwen" if asr else config.provider
         model = usage.get("model", config.asr_qwen_model if asr else config.model)
         key = f"{provider}:{model}"
         row = groups.setdefault(

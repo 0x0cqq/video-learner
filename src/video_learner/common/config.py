@@ -66,11 +66,11 @@ class Config(Record):
     asr_secret_file: str | None = None
     asr_window_seconds: int = Field(default=30, ge=5, le=60)
     asr_max_calls: int = Field(default=500, ge=1, le=10000)
+    jobs: int = Field(default=1, ge=1, le=32)
     sample_seconds: int = Field(default=2, ge=1, le=120)
     chapter_seconds: int = Field(default=180, ge=30, le=600)
     max_images_per_chapter: int = Field(default=12, ge=1, le=30)
     image_change_threshold: float = Field(default=0.035, ge=0, le=1)
-    crop: tuple[int, int, int, int] | None = None
     model: str = "deepseek-v4-flash-vision-exp"
     api_key_env: str = Field(default="DEEPSEEK_API_KEY", pattern=r"^[A-Za-z_][A-Za-z_0-9]*$")
     secret_file: str | None = None
@@ -103,7 +103,7 @@ def load_config(path: Path | None = None, **overrides) -> Config:
         data = tomllib.loads(path.read_text(encoding="utf-8")) if path else {}
         data = merge_provider_settings(data, overrides)
         return Config.model_validate(data)
-    except (OSError, ValueError, ValidationError) as exc:
+    except (OSError, ValueError) as exc:
         # Pydantic 完整错误可能带输入值；提示只列字段位置，避免回显敏感配置。
         fields = (
             ", ".join(str(e["loc"]) for e in exc.errors())
@@ -111,16 +111,3 @@ def load_config(path: Path | None = None, **overrides) -> Config:
             else ""
         )
         raise InputError(f"配置无效，请检查 TOML 字段及范围 {fields}") from exc
-
-
-def parse_crop(value: str | None) -> tuple[int, int, int, int] | None:
-    """解析原帧像素坐标 x,y,width,height；这里只检查数值，图像尺寸边界另行验证。"""
-    if value is None:
-        return None
-    try:
-        parts = tuple(int(part) for part in value.split(","))
-        if len(parts) != 4 or min(parts[:2]) < 0 or min(parts[2:]) <= 0:
-            raise ValueError
-        return parts
-    except ValueError as exc:
-        raise InputError("裁剪格式为 x,y,width,height，使用原帧像素") from exc

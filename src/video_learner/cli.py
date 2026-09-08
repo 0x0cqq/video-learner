@@ -11,14 +11,21 @@ from rich.table import Table
 
 from video_learner.common.core import InputError, TaskError, timestamp
 from video_learner.media.io import inspect_source
+from video_learner.terminal import TerminalProgress
 
-app = typer.Typer(no_args_is_help=True, help="将单视频整理为可核对、可修订的图文 Markdown。")
+app = typer.Typer(
+    no_args_is_help=False,
+    invoke_without_command=True,
+    help="将单视频整理为可核对、可修订的图文 Markdown。",
+)
 console = Console(stderr=True)
 
 
 @app.callback()
-def root() -> None:
-    """视频图文转换与修订。"""
+def root(ctx: typer.Context) -> None:
+    """无子命令时显示帮助，作为正常调用结束。"""
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
 
 
 @app.command("inspect")
@@ -28,6 +35,7 @@ def inspect_command(
     decode: bool = typer.Option(False, help="抽查前、中、后部音视频解码"),
     full: bool = typer.Option(False, help="顺序解码全部音视频帧"),
 ) -> None:
+    """检查本地视频或单课时缓存，输出媒体信息与诊断。"""
     # 只转换显示格式：JSON 走 stdout，人工提示走 stderr；有诊断仍输出结果并返回非零码。
     result = inspect_source(source, decode=decode, full=full)
     if as_json:
@@ -38,7 +46,7 @@ def inspect_command(
             console.print(f"{track.kind}: {track.codec} {track.width or ''}×{track.height or ''}")
         console.print(f"字幕：{', '.join(result.subtitles) or '未发现独立 SRT/VTT'}")
         console.print(
-            f"元数据下载完成：{result.metadata_complete}；媒体打开：{result.opened}；"
+            f"元数据下载完成：{result.metadata_complete}；媒体打开及轨道探测：{result.opened}；"
             f"片段解码：{result.sampled_decode}；全片验证：{result.full_verified}"
         )
         for diagnostic in result.diagnostics:
@@ -50,24 +58,30 @@ def inspect_command(
 @app.command("convert")
 def convert_command(
     source: Annotated[Path, typer.Argument(help="本地视频或单课时缓存")],
-    output: Annotated[Path, typer.Option(help="新的独立输出目录")],
+    output: Annotated[Path, typer.Option(help="输出目录；已存在时需用 -f 删除覆盖")],
+    force: bool = typer.Option(
+        False, "--force", "-f", help="删除已有输出目录后重新转换，含旧版本和手改"
+    ),
     start: str = "0",
     end: str | None = None,
     profile: str | None = None,
     instruction: str | None = None,
-    crop: str | None = None,
     subtitle: Path | None = None,
     config: Path | None = None,
     model: str | None = None,
     provider: Annotated[str | None, typer.Option(help="图文模型供应商 deepseek 或 qwen")] = None,
     asr_secret: Annotated[Path | None, typer.Option(help="Qwen ASR 的独立凭据文件")] = None,
+    jobs: Annotated[
+        int | None, typer.Option(min=1, max=32, help="ASR 并发数，默认 1；图文仍串行")
+    ] = None,
     secret: Path | None = None,
     allow_ai_additions: Annotated[
         bool | None, typer.Option("--allow-ai-additions/--no-ai-additions")
     ] = None,
+    verbose: bool = typer.Option(False, "--verbose", help="显示详细阶段事件"),
 ) -> None:
     """转换完整视频或 [start,end) 片段，输出图文讲义。"""
-    from video_learner.common.config import load_config, parse_crop
+    from video_learner.common.config import load_config
     from video_learner.common.core import parse_time
     from video_learner.workflows.conversion import convert
 
@@ -75,23 +89,30 @@ def convert_command(
         config,
         profile=profile,
         instruction=instruction,
-        crop=parse_crop(crop),
         model=model,
         provider=provider,
         asr_secret_file=str(asr_secret) if asr_secret else None,
+        jobs=jobs,
         secret_file=str(secret) if secret else None,
         allow_ai_additions=allow_ai_additions,
     )
-    path = convert(
-        source,
-        output,
-        settings,
-        parse_time(start),
-        parse_time(end) if end else None,
-        subtitle,
-        progress=lambda message: console.print(message, markup=False),
-        usage_report=display_usage,
-    )
+    reports = []
+    try:
+        with TerminalProgress(console, verbose) as progress:
+            path = convert(
+                source,
+                output,
+                settings,
+                parse_time(start),
+                parse_time(end) if end else None,
+                subtitle,
+                progress=progress,
+                usage_report=reports.append,
+                force=force,
+            )
+    finally:
+        for report in reports:
+            display_usage(report)
     typer.echo(str(path / "notes.md"))
 
 
@@ -136,7 +157,6 @@ def revise_command(
     block: str | None = None,
     instruction: str | None = None,
     frame: str | None = None,
-    crop: str | None = None,
     config: Path | None = None,
     secret: Path | None = None,
     provider: Annotated[str | None, typer.Option(help="图文模型供应商 deepseek 或 qwen")] = None,
@@ -144,27 +164,27 @@ def revise_command(
     allow_ai_additions: Annotated[
         bool | None, typer.Option("--allow-ai-additions/--no-ai-additions")
     ] = None,
+    verbose: bool = typer.Option(False, "--verbose", help="显示详细阶段事件"),
 ) -> None:
     """基于指定版本，只修订目标章节/段落或精确换图。"""
-    from video_learner.common.config import parse_crop
     from video_learner.common.core import parse_time
     from video_learner.workflows.revision import revise
 
-    path = revise(
-        workdir,
-        base=base,
-        section=section,
-        block=block,
-        instruction=instruction,
-        at_us=parse_time(frame) if frame else None,
-        crop=parse_crop(crop),
-        config_path=config,
-        secret=secret,
-        model_provider=provider,
-        model=model,
-        allow_ai_additions=allow_ai_additions,
-        progress=lambda message: console.print(message, markup=False),
-    )
+    with TerminalProgress(console, verbose) as progress:
+        path = revise(
+            workdir,
+            base=base,
+            section=section,
+            block=block,
+            instruction=instruction,
+            at_us=parse_time(frame) if frame else None,
+            config_path=config,
+            secret=secret,
+            model_provider=provider,
+            model=model,
+            allow_ai_additions=allow_ai_additions,
+            progress=progress,
+        )
     typer.echo(str(path / "notes.md"))
 
 
