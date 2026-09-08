@@ -132,5 +132,6 @@ class QwenProvider(DeepSeekProvider):
             usage=SimpleNamespace(
                 input_tokens=getattr(usage, "prompt_tokens", None),
                 output_tokens=getattr(usage, "completion_tokens", None),
+                input_tokens_details=getattr(usage, "prompt_tokens_details", None),
             ),
         )

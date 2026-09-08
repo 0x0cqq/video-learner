@@ -79,7 +79,7 @@ class ReviewItem(Record):
 
 class DraftBlock(Record):
     kind: Literal["text", "figure"]
-    body: str = Field(min_length=1, max_length=20000)
+    body: str = Field(max_length=20000)
     category: Literal["original", "ai_addition", "uncertain"]
     evidence_ids: list[str]
     frame_id: str | None

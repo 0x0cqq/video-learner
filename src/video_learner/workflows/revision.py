@@ -68,7 +68,7 @@ def baseline_config(manifest: dict) -> Config:
             for key in ("asr_provider", "asr_qwen_model", "asr_window_seconds"):
                 fields.pop(key, None)
         expected = canonical_hash(fields)
-    elif version == 2:
+    elif version in (2, 3):
         expected = extraction_hash(load_config(**settings))
     else:
         raise InputError("不支持的提取指纹版本")
@@ -433,11 +433,18 @@ def replace_figure(current: bytes, original: bytes, block: NoteBlock, book: Note
         old = [line for line in original_lines if line.startswith(prefix)]
         new = [line for line in rendered_lines if line.startswith(prefix)]
         existing = [i for i, line in enumerate(current_lines) if line.startswith(prefix)]
-        if len(old) != 1 or len(new) != 1 or len(existing) != 1:
+        if prefix != b"![" and not old and not existing:
+            continue
+        # 旧版来源行随换图移至 sources.md；已有手改仍须先检查，不能静默删除。
+        removing = prefix != b"![" and not new
+        if len(old) != 1 or (len(new) != 1 and not removing) or len(existing) != 1:
             raise AnchorConflict("图片块的受控图片/来源行缺失或重复")
         index = existing[0]
         if current_lines[index].rstrip(b"\r\n") != old[0].rstrip(b"\r\n"):
             raise AnchorConflict("图片块的受控图片/来源行已有手改，不能自动替换；请手工合并建议")
+        if removing:
+            current_lines.pop(index)
+            continue
         ending = b"\r\n" if current_lines[index].endswith(b"\r\n") else b"\n"
         current_lines[index] = new[0].rstrip(b"\r\n") + ending
     return b"".join(current_lines)

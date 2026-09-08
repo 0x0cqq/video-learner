@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from video_learner.common.core import InputError, TaskError, timestamp
 from video_learner.media.io import inspect_source
@@ -89,8 +90,42 @@ def convert_command(
         parse_time(end) if end else None,
         subtitle,
         progress=lambda message: console.print(message, markup=False),
+        usage_report=display_usage,
     )
     typer.echo(str(path / "notes.md"))
+
+
+def display_usage(report: dict) -> None:
+    """向 stderr 展示本次转换 token 与估价，缺失用量和部分费用不显示为完整总价。"""
+    table = Table(title="Token meter · 本次转换")
+    for heading in ("模型", "请求", "输入 token", "输出 token", "音频秒数", "Estimated 费用"):
+        table.add_column(heading)
+    for row in report["models"]:
+        cost = row["estimated_known_cost"]
+        amount = "未估算" if cost is None else f"{cost:.6f} {row['currency']}"
+        if cost is not None and row["unpriced_requests"]:
+            amount += "（部分）"
+        table.add_row(
+            row["model"],
+            str(row["requests"]),
+            f"{row['input_tokens']:,}",
+            f"{row['output_tokens']:,}",
+            f"{row['audio_seconds']:g}" if row["audio_seconds"] else "—",
+            amount,
+        )
+    console.print(table)
+    total = report["input_tokens"] + report["output_tokens"]
+    console.print(f"已记录 token：{total:,}；详细用量和计价配置：usage.json")
+    if report["missing_token_usage"]:
+        console.print(f"另有 {report['missing_token_usage']} 次请求缺少完整 token 用量。")
+    if any(row["unknown_cache_requests"] for row in report["models"]):
+        console.print("部分请求未返回缓存细分，相关输入按普通输入价格估算。")
+    if report["estimated_known_cost"]:
+        label = "Estimated 总费用" if report["estimate_complete"] else "Estimated 已知部分费用"
+        amounts = " + ".join(f"{v:.6f} {k}" for k, v in report["estimated_known_cost"].items())
+        console.print(f"{label}：{amounts}（按配置单价估算，以供应商账单为准）")
+    else:
+        console.print("费用未估算：需要模型单价及相应计费用量。")
 
 
 @app.command("revise")

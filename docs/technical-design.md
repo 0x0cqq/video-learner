@@ -1,6 +1,6 @@
 # 视频转 Markdown CLI：技术设计
 
-状态：P0 已有运行实现，真实内容质量与整课验收状态见[实现指南](implementation-guide.md)。日期：2026-09-07。
+状态：P0 已有运行实现，真实内容质量与整课验收状态见[实现指南](implementation-guide.md)。日期：2026-09-08。
 
 本文只记录当前技术契约。需求边界以[用户故事](user-stories.md)为准；安装操作见[使用指南](usage.md)；过程与 ADR 见[实现笔记](implementation-notes.md)。
 
@@ -39,13 +39,13 @@
 
 音频按重采样 PTS 放回 16 kHz 单声道缓冲，保留静音、时间空隙和原课偏移。语音识别统一使用 Qwen，不提供本地模型、下载、VAD 或 GPU 推理路径。
 
-默认使用 `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`，模型默认为 `qwen3-asr-flash`。16 kHz PCM16 WAV 以 Base64 发送，默认每 30 秒一个独立切片，可设 5–60 秒；不重叠、不按字数插值时间。该接口没有句级时间戳，`TranscriptSegment.alignment=audio_window` 表示真实上传区间，正文来源及疑点明确标注精度。局部切片可能截断词句，须人工核对。原始波形、切片映射和响应保存在工作目录。凭据独立、最多 500 次 ASR 调用（含重试），认证/截断直接失败，瞬时错误有界重试；不自动回退其他云服务。[用户指定的 Qwen 接口](https://platform.qianwenai.com/docs/api-reference/speech-recognition/qwen-asr/openai)
+默认使用 `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`，模型默认为 `qwen3-asr-flash`。16 kHz PCM16 WAV 以 Base64 发送，每片默认上限 30 秒，可设 5–60 秒。除尾片外，在窗口末尾 20% 内寻找至少 300 毫秒的低音量停顿（20 毫秒 RMS < 0.01），在最靠后的停顿中点切分；无停顿或全窗安静则保留完整窗口。下一片从实际切点开始，不丢静音、不重叠。固定阈值不等于语音检测，也不保证词句完整。该接口没有句级时间戳，`TranscriptSegment.alignment=audio_window` 表示真实上传区间，精度说明放在 `sources.md`。原始波形、切片映射和响应保存在工作目录。凭据独立、最多 500 次 ASR 调用（含重试），认证/截断直接失败，瞬时错误有界重试；不自动回退其他云服务。[用户指定的 Qwen 接口](https://platform.qianwenai.com/docs/api-reference/speech-recognition/qwen-asr/openai)
 
-当前提取指纹格式为 v2。修订旧目录时先按原格式校验指纹，再读取必要设置并复用已有证据；兼容层不加载本地模型、不迁移或改写原目录。新配置不接受旧的本地模型及模式选项。
+当前提取版本为 v3，指纹字段沿用 v2。修订旧目录时先按原格式校验指纹，再读取必要设置并复用已有证据；兼容层不加载本地模型、不迁移或改写原目录。新配置不接受旧的本地模型及模式选项。
 
 原始转写不会被 LLM 改写覆盖。真实术语、分块边界和字幕同步仍需核对，不把合法时间戳视为识别准确的证明。SRT/VTT 检查格式、顺序、边界、有效文本和覆盖比例；必须显式选择，才替代 ASR。
 
-默认每 10 秒扫描全帧或用户 ROI，用低分辨率灰度均差去重。同时保留每章起点及至少每 30 秒的周期候选，避免缓慢板书的小面积变化被过滤。每章最多向模型提供 12 张候选，超过预算时按时间均匀选择；模型再选择必要插图。
+默认每 2 秒扫描全帧或用户 ROI，比较相邻 96×54 灰度缩略图的均差。变化达到 `image_change_threshold`（默认 0.035）时保留切换前一帧，同时保留起始帧、约每 30 秒的周期帧和最后一个采样帧。优先保留页面末态，但不推断“板书已经写完”；频繁切屏直接产生多个候选，不引入场景分类或复杂评分。短于采样间隔的画面仍可能遗漏。每章最多向模型提供 12 张候选，超过预算时均匀选择；模型再选择必要插图，允许候选冗余。
 
 每张候选保留原帧、裁剪图、父证据、原像素坐标、请求时间、实际 PTS、time base、规范零点和文件哈希。裁剪不增加源信息。当前没有独立 OCR、自动布局估计、模糊字符恢复或自主补帧；清晰度、教学意义和内容对应需要模型选择与人工核对。
 
@@ -55,13 +55,15 @@
 
 DeepSeek 使用 Responses API 图像输入和 JSON schema 响应。Qwen 使用 Chat Completions，固定连接 `https://dashscope.aliyuncs.com/compatible-mode/v1`，默认 `qwen3.8-flash`；图片以 Base64 `image_url` 发送，schema 同时写入请求格式和系统提示。两者均执行 Pydantic 及跨字段校验。text 块的 frame_id 必须为 null；figure 块必须引用本次提供的 frame ID 并将其包含在证据列表中。同章不重复导出同一截图。模型不能控制本地路径、HTML 锚点或来源时间戳。[DeepSeek Responses API](https://api-docs.deepseek.com/api/create-response/)
 
-DeepSeek 默认 `reasoning_effort = "none"`，单次最多 6000 输出 token，任务最多 80 次实际请求、最多 2 次重试，均可在 TOML 调整。SDK 内置重试关闭。输出截断直接失败；临时网络错误及结构/引用错误有界重试；认证和请求配置错误直接报告。日志记录服务返回的输入/输出 token 和耗时，不估算金额；超时请求仍可能计费。[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)
+DeepSeek 默认 `reasoning_effort = "none"`，单次最多 6000 输出 token，任务最多 80 次实际请求、最多 2 次重试，均可在 TOML 调整。SDK 内置重试关闭。输出截断直接失败；临时网络错误及结构/引用错误有界重试；认证和请求配置错误直接报告。日志记录服务返回的输入/输出 token 和耗时；超时请求仍可能计费。[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)
 
 Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 token。只拼接 `delta.content`；思考增量仅触发阶段提示，不保存文本。必须收到正常停止标记且正文非空才进入校验；连接中断丢弃部分正文，重试仍计入调用上限。处理仅含 usage 的尾块，结束或异常均关闭流。TOML 可通过 `qwen_enable_thinking` 和 `qwen_thinking_budget` 调整；DeepSeek 的 `reasoning_effort` 不发送给 Qwen。[Qwen 兼容接口](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)、[Qwen 图像理解](https://platform.qianwenai.com/docs/developer-guides/multimodal/vision)
 
-章节默认 180 秒，调用前登记完整覆盖计划。固定证据包包含目标范围的可引用转写、候选图、用户要求和相邻只读文本；相邻文本不提供可引用 ID，避免跨章重复整理。逐章组织，失败章节保持未完成。P0 不运行模型自主工具循环。
+章节目标时长默认 180 秒，转写后在目标切点前后 20% 内选择最近的转写结束边界，再登记完整连续覆盖计划；没有合适边界则按长度切分。它是证据分组，不代表语义话题检测。固定证据包包含本章转写、候选图、用户要求、相邻只读文本和上一章末尾至多 3000 字符；上下文不可引用，供承接与避免重复。逐章组织，失败章节保持未完成。P0 不运行模型自主工具循环。
 
 编程保留目标、修改、错误、修复和运行结果；数学保留原课中存在的假设、符号、关键推导、结论和条件；混合内容按实际材料组织，不强行填模板。内容分为原课整理、显式要求的 AI 补充解释和待核对。模糊公式、代码和未交代条件进入疑点清单。
+
+正文直接讲解课程内容，不逐图描述或堆放转写。图注允许为空，文字块必须非空；图意自明或已由正文解释时省略图注，不强求每章配图。提示词版本为 p0-3。原课类别、块 ID、来源区间和证据列表放入 `sources.md`；正文仅显式标记 AI 补充和待核对，保留隐藏修订锚点。
 
 课程文字、字幕、代码和命令均为数据；供应商没有可执行工具，素材不能授权执行程序、读取任意路径或修改规则。请求和产物不含真实密钥或签名下载 URL。机械校验只保证结构、证据边界及资源关系；事实支持、公式正确和步骤覆盖属于独立内容评估。
 
@@ -72,13 +74,16 @@ Pydantic 对象为 Source、Track、TranscriptSegment、FrameEvidence、Chapter�
 ```text
 output/sample/
   notes.md
+  sources.md
   review.md
   assets/
   source.json
   transcript.jsonl
   notes.json
+  usage.json
   revisions/r002/
     notes.md
+    sources.md
     review.md
     source.json
     notes.json
@@ -101,7 +106,7 @@ output/sample/
 
 目标的当前手改文本作为修订输入；非目标 Markdown 按原字节保留，写入前重新检查基线哈希。章节修订保留标题，避免改写范围外的目录。保留的手改块标为 manual_unverified。用户新增的安全本地图片会复制；外部 URL、越界、缺失资源和不支持的结构均报错。
 
-精确换图/裁剪直接调用媒体层，不转写、不读取 AI 凭据。当前换图限定在基线转换时间范围内。实际帧、证据与来源行同步更新，图注保留并进入待核对；受控图片/来源行已被手改时输出冲突诊断和建议片段，不猜测位置。
+精确换图/裁剪直接调用媒体层，不转写、不读取 AI 凭据。当前换图限定在基线转换时间范围内。实际帧、证据与独立来源索引同步更新，图注保留并进入待核对；受控图片行已被手改时输出冲突诊断。旧格式的目标图片块来源行迁出正文，迁出前同样检查手改；其他块的字节保持不变。
 
 ## 6. 配置、提交与失败
 
@@ -123,5 +128,7 @@ P1 在用户授权后增加 status/resume、SQLite 检查点、配置依赖失�
 
 
 ## 运行计时
+
+`Events` 在当前运行内保留请求开始及返回用量事件，`common/usage.py` 按模型汇总转换用量和估价，CLI 负责表格显示。重试各计一次，输入/输出子项不重复相加；汇总不轮询日志，也不混入后续修订。转换退出时将 `usage.json` 写入最终或失败目录，包含用量缺口、已知部分费用与价格快照。计价配置不影响证据提取指纹。单价及字段只维护在[价格快照](../src/video_learner/common/prices.toml)和[使用说明](usage.md#token-meter-与估算费用)中。
 
 事件日志按每次操作记录 run_id、UTC 时间和单调时钟相对秒数，保留原有 stage/status/seconds 字段。图文请求增加章节、尝试次数、打包字节数与耗时、失败耗时和响应 ID；Qwen 流计时区分打开流、首块、思考首块、正文首块及结束，只记录延迟和计数，不保存思考文本。流内通用 API 错误以受控 TaskError 结束并记录时长，不回显原始服务消息、不自动重试。开发工具及测量边界见[性能分析](performance.md)。

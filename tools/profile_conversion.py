@@ -46,7 +46,7 @@ def summarize_events(records: list[dict]) -> dict:
         if stage.startswith("revise:"):
             break
         if status == "completed" and (
-            stage in ("prepare", "transcribe", "sample", "validate_export")
+            stage in ("prepare", "transcribe", "sample", "plan_chapters", "validate_export")
             or stage.startswith("compose:")
         ):
             stages[stage] = record["seconds"]
@@ -67,6 +67,7 @@ def summarize_events(records: list[dict]) -> dict:
         "prepare": stages.get("prepare", 0),
         "transcribe": stages.get("transcribe", 0),
         "sample": stages.get("sample", 0),
+        "plan_chapters": stages.get("plan_chapters", 0),
         "compose": sum(value for key, value in stages.items() if key.startswith("compose:")),
         "validate_export": stages.get("validate_export", 0),
     }

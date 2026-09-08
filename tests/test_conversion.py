@@ -66,6 +66,64 @@ def test_offline_conversion_exports_references_and_versions(converted):
     portable = (root / "source.json").read_text(encoding="utf-8")
     assert str(Path.cwd()) not in portable
     assert "secret_file" not in json.dumps(manifest)
+    assert "来源：" not in data.decode()
+    assert "**原课整理" not in data.decode()
+    sources = (root / "sources.md").read_text(encoding="utf-8")
+    assert "blk-001-001" in sources and "tr-000001" in sources
+
+
+def test_optional_caption_preserves_figure_and_rejects_empty_text(converted):
+    """无图注时仍保留图片与锚点；AI 补充和疑点必须可见，空文字不得冒充有效内容。"""
+    from video_learner.notes.composition import evidence_packet, validate_draft
+    from video_learner.notes.rendering import render_notes
+
+    root, _ = converted
+    book = Notebook.model_validate_json((root / "notes.json").read_text(encoding="utf-8"))
+    chapter = book.chapters[0]
+    chapter.blocks[1].body = ""
+    data = render_notes(book)
+    assert len(expected_spans(data, book)) == 3
+    assert len(image_dependencies(data)) == 1
+    packet, _ = evidence_packet(book, chapter, Config(), root)
+    draft = Draft(
+        title=chapter.title,
+        blocks=[
+            DraftBlock(**b.model_dump(include=DraftBlock.model_fields.keys()))
+            for b in chapter.blocks
+        ],
+        review=[],
+    )
+    validate_draft(draft, packet)
+    draft.blocks[0].body = " "
+    with pytest.raises(TaskError, match="正文不能为空"):
+        validate_draft(draft, packet)
+    for category, label in [("ai_addition", "AI 补充解释"), ("uncertain", "待核对")]:
+        chapter.blocks[0].category = category
+        assert f"**{label}**" in render_notes(book).decode()
+
+
+def test_chapters_follow_nearby_transcript_boundaries():
+    """章边界移到附近真实切片末尾，保证连续覆盖且同一切片不会被两章重复引用。"""
+    from video_learner.common.schemas import TranscriptSegment
+    from video_learner.notes.composition import plan_chapters
+
+    segments = [
+        TranscriptSegment(
+            id=f"tr-{index}",
+            start_us=begin * 1_000_000,
+            end_us=end * 1_000_000,
+            text="测试",
+            origin="asr",
+            alignment="audio_window",
+        )
+        for index, (begin, end) in enumerate([(0, 175), (175, 355), (355, 410)])
+    ]
+    chapters = plan_chapters(0, 410_000_000, Config(), segments)
+    assert [(c.start_us, c.end_us) for c in chapters] == [
+        (0, 175_000_000),
+        (175_000_000, 355_000_000),
+        (355_000_000, 410_000_000),
+    ]
 
 
 def test_anchor_fences_and_conflicts(converted):

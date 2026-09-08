@@ -100,6 +100,7 @@ class Events:
         self.progress = progress or (lambda _: None)
         self.run_id = uuid.uuid4().hex
         self.started = time.monotonic()
+        self.usage_events: list[dict] = []
 
     def emit(self, stage: str, status: str, **details) -> None:
         """追加带 UTC 与运行内相对时间的事件；details 须由调用方筛除凭据和原始异常。"""
@@ -111,6 +112,9 @@ class Events:
             "timestamp_utc": datetime.now(UTC).isoformat(),
             "elapsed_seconds": time.monotonic() - self.started,
         }
+        if stage in ("model_call", "asr_model_call", "model_usage", "asr_model_usage"):
+            if status in ("running", "received"):
+                self.usage_events.append(record)
         # 这里只序列化受控字段，不负责从供应商原始错误或 URL 中自动剔除敏感值。
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")

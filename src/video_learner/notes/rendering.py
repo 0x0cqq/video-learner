@@ -168,32 +168,15 @@ def frame_of(book: Notebook, identity: str | None) -> FrameEvidence:
 
 
 def render_block(block: NoteBlock, book: Notebook) -> bytes:
-    """由受信任索引生成块锚点、图片路径和来源行，返回 UTF-8 字节。
-
-    来源显示关联证据的包围区间及数量，切片转写显式提示非句级对齐。
-    """
-    parts = [
-        f"<!-- vl:begin block {block.id} -->",
-        f"**{CATEGORIES[block.category]} · {block.id}**",
-        "",
-    ]
+    """渲染正文与可选图注；修订标识保持隐藏，补充和疑点仍显式区分。"""
+    parts = [f"<!-- vl:begin block {block.id} -->", ""]
+    if block.category != "original":
+        parts.extend([f"**{CATEGORIES[block.category]}**", ""])
     if block.kind == "figure":
         frame = frame_of(book, block.frame_id)
         parts.extend([f"![原视频截图 {timestamp(frame.at_us)}](assets/{frame.id}.png)", ""])
-    parts.append(block.body.strip())
-    if block.evidence_ids:
-        ranges = [evidence_range(book, identity) for identity in block.evidence_ids]
-        begin, end = min(r[0] for r in ranges), max(r[1] for r in ranges)
-        time = timestamp(begin) if begin == end else f"{timestamp(begin)}–{timestamp(end)}"
-        references = f"> 来源：{time}（{len(block.evidence_ids)} 条证据，关联见 notes.json）"
-        if any(
-            s.id in block.evidence_ids and s.alignment == "audio_window" for s in book.transcript
-        ):
-            references += "；语音按切片区间标注，非句级对齐"
-        if block.kind == "figure":
-            frame = frame_of(book, block.frame_id)
-            references += f"；截图：{timestamp(frame.at_us)} ({frame.id})"
-        parts.extend(["", references])
+    if block.body.strip():
+        parts.extend([block.body.strip(), ""])
     parts.extend([f"<!-- vl:end block {block.id} -->", ""])
     return ("\n".join(parts) + "\n").encode("utf-8")
 
@@ -203,8 +186,7 @@ def render_chapter(chapter: Chapter, book: Notebook) -> bytes:
     heading = (
         f"<!-- vl:begin section {chapter.id} -->\n"
         f'<a id="{chapter.id}"></a>\n\n'
-        f"## {inline_text(chapter.title)} · {chapter.id}\n\n"
-        f"原视频 {timestamp(chapter.start_us)}–{timestamp(chapter.end_us)}\n\n"
+        f"## {inline_text(chapter.title)}\n\n"
     ).encode()
     if chapter.status != "completed":
         heading += "**本章未完成，请查看 review.md；不代表整段已转换。**\n\n".encode()
@@ -221,16 +203,14 @@ def render_notes(book: Notebook) -> bytes:
     lines = [
         f"# {inline_text(book.title)}",
         "",
-        f"范围：{timestamp(book.start_us)}–{timestamp(book.end_us)}；"
-        f"状态：{'初稿已生成，内容待人工核对' if complete else '部分未完成'}。",
-        "",
-        "公式需要支持 LaTeX 数学渲染的 Markdown 阅读器。代码未经本工具执行验证。",
+        *([] if complete else ["**部分章节未完成，详见 review.md。**", ""]),
+        "[来源索引](sources.md) · [待核对事项](review.md)",
         "",
         "## 章节目录",
         "",
     ]
     for chapter in book.chapters:
-        lines.append(f"- [{inline_text(chapter.title)} · {chapter.id}](#{chapter.id})")
+        lines.append(f"- [{inline_text(chapter.title)}](#{chapter.id})")
     return ("\n".join(lines) + "\n\n").encode() + b"".join(
         render_chapter(chapter, book) for chapter in book.chapters
     )
@@ -260,6 +240,49 @@ def render_review(book: Notebook) -> bytes:
         for block in chapter.blocks:
             if block.sync_status == "manual_unverified":
                 lines.append(f"- {block.id}：保留了用户手改，结构化正文与当前文稿未核验同步。")
+    return ("\n".join(lines) + "\n").encode()
+
+
+def render_sources(book: Notebook) -> bytes:
+    """在阅读主线之外列出章节、块和真实证据时间，供定位原课及修订目标。"""
+    lines = [
+        "# 来源索引",
+        "",
+        "讲义中的隐藏锚点用于局部修订，目标 ID 见下表。完整关联保存在 notes.json。",
+        "语音来源按实际音频切片区间记录，不表示句级对齐；截图时间为实际解码帧时间。",
+        "公式需支持 LaTeX 的 Markdown 阅读器；代码未经本工具执行验证。",
+        "",
+    ]
+    for chapter in book.chapters:
+        lines.extend(
+            [
+                f"## {inline_text(chapter.title)} · {chapter.id}",
+                "",
+                f"原视频 {timestamp(chapter.start_us)}–{timestamp(chapter.end_us)}",
+                "",
+                "| 修订目标 | 类型 | 来源区间 | 截图时间 | 证据 ID |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for block in chapter.blocks:
+            ranges = [evidence_range(book, identity) for identity in block.evidence_ids]
+            interval = (
+                f"{timestamp(min(r[0] for r in ranges))}–{timestamp(max(r[1] for r in ranges))}"
+                if ranges
+                else "—"
+            )
+            lines.append(
+                f"| {block.id} | {CATEGORIES[block.category]} | {interval} | "
+                + (
+                    timestamp(frame_of(book, block.frame_id).at_us)
+                    if block.kind == "figure"
+                    else "—"
+                )
+                + " | "
+                + ", ".join(block.evidence_ids)
+                + " |"
+            )
+        lines.append("")
     return ("\n".join(lines) + "\n").encode()
 
 
@@ -361,5 +384,6 @@ def export_book(
     copy_dependencies(data, destination, destination)
     atomic_bytes(contained(destination, "notes.md"), data)
     atomic_bytes(contained(destination, "review.md"), render_review(book))
+    atomic_bytes(contained(destination, "sources.md"), render_sources(book))
     write_json(contained(destination, "notes.json"), book.model_dump())
     write_json(contained(destination, "source.json"), book.source.model_dump())

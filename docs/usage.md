@@ -28,13 +28,13 @@ uv run video-learner convert "C:\Users\cqqqwq\Videos\bilibili\41301577497" --sta
 
 时间可用秒数或 `HH:MM:SS`，最多六位小数，按 `[start,end)` 处理。省略范围转换整课。输出必须是与源目录不重叠的新目录。
 
-`--profile` 支持 `programming`、`math`、`mixed`；`--instruction` 设置组织要求。`--crop x,y,width,height` 使用原帧像素指定关注区域；默认保留全帧。固定采样和去重可能遗漏短暂画面，模型会从每章有界候选图中选图，请核对中间步骤。
+`--profile` 支持 `programming`、`math`、`mixed`；`--instruction` 设置组织要求。`--crop x,y,width,height` 使用原帧像素指定关注区域；默认保留全帧。默认每 2 秒比较画面，明显变化时保留切换前一帧，并补周期帧和末帧，再由模型选图。短于采样间隔的画面可能遗漏，候选也允许冗余。`sample_seconds` 可调整间隔。
 
 `--subtitle` 可指定 UTF-8 SRT/VTT 替代 ASR。字幕需时间合法、覆盖当前范围；覆盖比例写入工作记录，同步仍需人工核对。发现但未显式选择的字幕不会自动覆盖语音识别。
 
 默认使用阿里云 Qwen ASR，按原视频时间提取 16 kHz 单声道音频并发送云端识别；不安装或下载本地识别模型。
 
-生成的根目录对应 r001：`notes.md`、`assets/`、`review.md`、`source.json`、`transcript.jsonl`、`notes.json`。`.work/` 保存本机来源、指纹、原帧、音频窗口、生成快照、版本清单与日志。
+生成的根目录对应 r001：`notes.md`、`assets/`、`sources.md`、`review.md`、`source.json`、`transcript.jsonl`、`notes.json`。正文保留连贯解释与必要图片，图注可省略；来源区间、证据和修订 ID 集中在 `sources.md`。`.work/` 保存本机来源、指纹、原帧、音频窗口、生成快照、版本清单与日志。
 
 ## 云端语音识别
 
@@ -44,7 +44,9 @@ uv run video-learner convert "C:\Users\cqqqwq\Videos\bilibili\41301577497" --sta
 uv run video-learner convert "C:\Users\cqqqwq\Videos\bilibili\1272065375" --start 00:10:00 --end 00:20:00 --profile math --asr-secret "C:\projects\video-learner\secrets\aliyun.secret" --secret "C:\projects\video-learner\secrets\deepseek.secret" --output "C:\projects\video-learner\output\my-qwen-notes"
 ```
 
-Qwen 凭据也可用 `DASHSCOPE_API_KEY`，与 DeepSeek 凭据独立。端点固定阿里云 DashScope，模型默认 `qwen3-asr-flash`。音频切片以 Base64 发送；默认每片 30 秒、最多 500 次调用，TOML 字段为 `asr_window_seconds`、`asr_max_calls`。窗口越短，回看区间越小、请求越多。
+Qwen 凭据也可用 `DASHSCOPE_API_KEY`，与 DeepSeek 凭据独立。端点固定阿里云 DashScope，模型默认 `qwen3-asr-flash`。音频切片以 Base64 发送；默认每片上限 30 秒、最多 500 次调用，TOML 字段为 `asr_window_seconds`、`asr_max_calls`。窗口末尾 20% 内有至少 300 毫秒低音量停顿时，在停顿中间提前切分；没有则按长度切。静音不删除，尾片完整保留。提前切分可能增加少量调用。
+
+`chapter_seconds` 默认 180 秒，是目标章长。章节在目标切点前后 20% 内尽量对齐转写结束位置，减少同一音频片段跨章重复。停顿与转写边界不等于话题边界。
 
 该兼容接口不返回句级时间戳；来源明确标注为真实音频切片区间，切片边界可能截断词句。10 分钟数学音频实测转写约 32 秒，不是所有课程的固定性能。认证、调用上限和未完成输出会明确失败。识别设置进入提取指纹，修订时复用基线证据。历史本地识别产物仍可修订，无需重新转写。旧配置中的本地模型/模式参数及 CLI 的 ASR 切换选项已不再接受。
 
@@ -66,7 +68,7 @@ uv run video-learner revise "C:\projects\video-learner\output\sample" --base r00
 
 ## 修订文字
 
-从当前 Markdown 的章节标题和块标记取得 ID。默认基线为 r001，不会隐式选择最新版。
+从当前版本的 `sources.md` 取得章节和块 ID，也可查看 Markdown 源码中的隐藏锚点。默认基线为 r001，不会隐式选择最新版。
 
 ```powershell
 uv run video-learner revise "C:\projects\video-learner\output\sample" --base r001 --section ch-001 --instruction "保留关键步骤，压缩重复说明" --secret "C:\projects\video-learner\secrets\deepseek.secret"
@@ -83,14 +85,34 @@ uv run video-learner revise "C:\projects\video-learner\output\sample" --base r00
 uv run video-learner revise "C:\projects\video-learner\output\sample" --base r002 --block fig-001-002 --frame 00:46:12 --crop 640,0,640,410
 ```
 
-图片块 ID 以实际输出为准。只提供 `--crop` 时复用原实际帧时间；只提供 `--frame` 时保留原裁剪。替换帧须在当前转换范围内，裁剪使用原帧像素。精确换图不读取模型凭据、不转写、不发 AI 请求。图注保留并加入待核对，受控图片行或来源行被改坏时报告冲突。
+图片块 ID 以实际输出为准。只提供 `--crop` 时复用原实际帧时间；只提供 `--frame` 时保留原裁剪。替换帧须在当前转换范围内，裁剪使用原帧像素。精确换图不读取模型凭据、不转写、不发 AI 请求。图注保留并加入待核对，来源索引同步更新；受控图片行或旧版来源行已有手改时报告冲突。
 
-修订生成 `revisions/r002/` 等独立目录，包含本版 Markdown、图片、结构化索引、来源、疑点和 `changes.md`，旧文件保持不变。复制任一版本的 `notes.md` 和 `assets/` 即可阅读；自加图片在其他相对目录时一并复制该目录。
+修订生成 `revisions/r002/` 等独立目录，包含本版 Markdown、图片、结构化索引、来源、疑点和 `changes.md`，旧文件保持不变。复制任一版本的 `notes.md` 和 `assets/` 即可阅读正文；需要保留来源与疑点链接时同时复制 `sources.md` 和 `review.md`。自加图片在其他相对目录时一并复制该目录。
 
 ## 失败与检查
 
 阶段日志走 stderr，JSON 和成功路径走 stdout。退出码：0 成功，1 运行/部分失败，2 输入或配置错误，130 用户中断。部分失败会列出未完成章节，不登记成功版本。P0 没有 `resume` 或 `status`；重新转换需指定新目录。
 
-云端每次输入、输出和总调用次数均有限制；日志记录服务返回的 token 用量，不估算金额。DeepSeek 默认非思考模式，Qwen 默认开启思考；各自参数在 TOML 配置。超时调用可能仍计费。认证/参数错误和输出截断直接报告；临时网络错误及无效结构有界重试，流式连接失败后丢弃未完成正文。
+云端每次输入、输出和总调用次数均有限制。DeepSeek 默认非思考模式，Qwen 默认开启思考；各自参数在 TOML 配置。超时调用可能仍计费。认证/参数错误和输出截断直接报告；临时网络错误及无效结构有界重试，流式连接失败后丢弃未完成正文。
+
+## Token meter 与估算费用
+
+`convert` 结束时在终端显示各模型的请求次数、输入/输出 token、音频秒数和 Estimated 费用，并在输出目录保存 `usage.json`。成功、部分失败与已开始后的中断都会汇总已经记录的请求；预检失败尚未创建工作目录时不生成报告。费用和来源信息不插入讲义正文。
+
+默认使用随包保存的[价格快照](../src/video_learner/common/prices.toml)，无需额外开关。该文件是当前单价、来源与日期的维护位置。图文按输入/输出 token 计费，缓存命中输入使用缓存价；ASR 按服务端返回的音频秒数计费。思考 token 已包含在服务返回的输出总量中，不再额外相加；图片同样使用服务计量，不自行按字符数换算。
+
+DeepSeek 依据请求开始时的北京时间选择高峰/空闲价格；跨时段请求仍按开始时刻估算。缓存细分缺失时按普通输入价估算并提示，历史事件缺少开始时间时采用高峰价。缺失 token、计费秒数或单价的请求标为未估算；只算出部分费用时不显示为总价。报告包含所用单价，所有价格均为 estimated，以供应商账单为准，不自动联网更新价格。
+
+修改单价可复制快照为自己的配置文件，再通过 `--config` 使用：
+
+```powershell
+Copy-Item src/video_learner/common/prices.toml config.prices.toml
+# 编辑 config.prices.toml 中的单价，也可加入其他转换配置。
+uv run video-learner convert "C:\path\lesson.mp4" --provider qwen --config config.prices.toml --output "C:\path\notes"
+```
+
+`prices` 的键是 `供应商:模型名`，例如 `qwen:qwen3.8-flash`。自定义表整体替换默认表，换到未报价模型时仍汇总 token，但不套用其他模型的单价。`input_per_million`、`output_per_million`、`cached_input_per_million` 按百万 token；`audio_per_second` 按秒，不能与 token 单价混用。`currency` 为报价币种，不同币种分别汇总，不转换汇率。未配置的字段表示未知，显式填零才表示免费。
+
+当前报告对应本次 `convert`，不包含随后 `revise` 的费用；修订仍保留原有逐次请求用量日志。
 
 开发验证：`uv run pytest`、`uv run ruff check .`、`uv run ruff format --check .`。默认测试使用自造媒体和确定性模型替身，不访问网络、GPU、凭据或私人课程。

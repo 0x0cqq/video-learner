@@ -73,3 +73,28 @@ def test_small_temporary_board_change_retains_candidate(video, tmp_path, monkeyp
     monkeypatch.setattr("video_learner.media.evidence.extract_frame", board)
     frames = sample_frames(video, description, 0, 90_000_000, Config(), tmp_path / "board")
     assert any(40_000_000 <= f.at_us < 70_000_000 for f in frames)
+
+
+def test_sampling_keeps_board_before_page_turn(video, tmp_path, monkeypatch):
+    """模拟逐步写完、停留后翻页，要求留下翻页前板书及末页，不只抓到新页开头。"""
+    from fractions import Fraction
+
+    from PIL import Image, ImageDraw
+
+    source = inspect_source(video)
+    source.duration_us = 20_000_000
+
+    def board(path, source, at_us, end_us):
+        """前八秒逐行写字，十四秒换白色新页；细笔画不触发整屏变化阈值。"""
+        image = Image.new("RGB", (160, 96), "darkgreen" if at_us < 14_000_000 else "white")
+        if at_us < 14_000_000:
+            draw = ImageDraw.Draw(image)
+            for index in range(min(4, at_us // 2_000_000)):
+                draw.line((20, 20 + index * 12, 100, 20 + index * 12), fill="white")
+        pts = int(Fraction(at_us, 1_000_000) / Fraction(source.tracks[0].time_base))
+        return image, at_us, pts
+
+    monkeypatch.setattr("video_learner.media.evidence.extract_frame", board)
+    frames = sample_frames(video, source, 0, source.duration_us, Config(), tmp_path / "pages")
+    assert {12_000_000, 18_000_000} <= {f.at_us for f in frames}
+    assert len(frames) == 3

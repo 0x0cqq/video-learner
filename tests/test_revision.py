@@ -12,6 +12,30 @@ from video_learner.notes.rendering import image_dependencies, locate
 from video_learner.workflows.revision import revise
 
 
+def test_legacy_figure_source_moves_outside_text(converted):
+    """旧图块迁出来源行时保留手改图注；来源行本身已被修改则仍报告冲突。"""
+    from video_learner.notes.rendering import AnchorConflict, render_block
+    from video_learner.workflows.revision import replace_figure
+
+    root, _ = converted
+    book = Notebook.model_validate_json((root / "notes.json").read_text(encoding="utf-8"))
+    block = book.chapters[0].blocks[1]
+    rendered = render_block(block, book)
+    old_source = "> 来源：00:00:00（1 条证据，关联见 notes.json）\n".encode()
+    original = rendered.replace(b"<!-- vl:end block", old_source + b"<!-- vl:end block")
+    current = original.replace(block.body.encode(), "手改图注必须保留".encode())
+    updated = replace_figure(current, original, block, book)
+    assert "手改图注必须保留" in updated.decode()
+    assert "来源：" not in updated.decode()
+    with pytest.raises(AnchorConflict, match="已有手改"):
+        replace_figure(
+            current.replace(old_source, old_source.replace(b"00:00:00", b"00:00:01")),
+            original,
+            block,
+            book,
+        )
+
+
 @pytest.mark.parametrize(
     "provider,mode", [("local", "standard"), ("local", "fast"), ("qwen", "standard")]
 )

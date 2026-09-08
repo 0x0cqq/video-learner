@@ -118,6 +118,50 @@ def test_default_conversion_uses_qwen_and_reports_missing_key(video, tmp_path, m
     monkeypatch.setattr("video_learner.providers.asr.QwenASR", Cloud)
     convert(video, output, Config(), provider=DeterministicProvider())
     assert len(calls) == 1
-    assert "非句级对齐" in (output / "notes.md").read_text(encoding="utf-8")
+    assert "不表示句级对齐" in (output / "sources.md").read_text(encoding="utf-8")
+    assert "来源：" not in (output / "notes.md").read_text(encoding="utf-8")
     manifest = json.loads((output / ".work/manifest.json").read_text(encoding="utf-8"))
-    assert manifest["extraction_version"] == 2
+    assert manifest["extraction_version"] == 3
+
+
+def test_pause_cut_and_continuous_windows(video, tmp_path, monkeypatch):
+    """末尾停顿改变真实上传边界，片段偏移、静音及尾片仍无空洞无重叠地保留。"""
+    from video_learner.providers.asr import pause_cut
+
+    assert pause_cut(np.zeros(30 * 16000, dtype=np.float32)) == 30 * 16000
+    assert pause_cut(np.full(30 * 16000, 0.1, dtype=np.float32)) == 30 * 16000
+    source = inspect_source(video)
+    source.duration_us = 75_000_000
+    durations = []
+
+    def waveform(path, source, start_us, end_us):
+        """以原时间构造两处停顿，确保下一片使用调整后的起点重新取音频。"""
+        times = np.arange((end_us - start_us) * 16000 // 1_000_000) / 16000 + start_us / 1e6
+        values = np.full(len(times), 0.1, dtype=np.float32)
+        values[((times >= 36) & (times < 38)) | ((times >= 63) & (times < 65))] = 0
+        return values
+
+    class Recognizer:
+        def recognize(self, wav):
+            """读取实际送入识别器的 WAV 时长，避免只检查索引而漏掉音频未同步裁剪。"""
+            with wave.open(io.BytesIO(wav), "rb") as audio:
+                durations.append(audio.getnframes() / audio.getframerate())
+            return "一段真实窗口的转写"
+
+    monkeypatch.setattr("video_learner.media.evidence.audio_window", waveform)
+    result = transcribe_qwen(
+        video,
+        source,
+        10_000_000,
+        75_000_000,
+        Config(),
+        tmp_path,
+        Events(tmp_path),
+        recognizer=Recognizer(),
+    )
+    assert [(s.start_us, s.end_us) for s in result] == [
+        (10_000_000, 37_000_000),
+        (37_000_000, 64_000_000),
+        (64_000_000, 75_000_000),
+    ]
+    assert durations == [27, 27, 11]

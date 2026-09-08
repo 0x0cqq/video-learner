@@ -10,7 +10,39 @@ from video_learner.common.core import InputError
 from video_learner.common.schemas import Record
 
 
+class ModelPrice(Record):
+    """用户提供的单模型单价；空值表示尚未提供，不代表免费。"""
+
+    currency: str = Field(default="CNY", min_length=1, max_length=12)
+    input_per_million: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    output_per_million: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    cached_input_per_million: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    audio_per_second: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    deepseek_off_peak_multiplier: float | None = Field(default=None, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def billing_unit(self):
+        """拒绝同时指定音频和 token 单价，避免无声忽略其中一种计费规则。"""
+        if self.audio_per_second is not None and any(
+            value is not None
+            for value in (
+                self.input_per_million,
+                self.output_per_million,
+                self.cached_input_per_million,
+            )
+        ):
+            raise ValueError("音频按秒计价与 token 计价不能同时配置")
+        return self
+
+
+def default_prices() -> dict[str, ModelPrice]:
+    """读取随包保存的公开价格快照；用户的 prices 表可整体替换它。"""
+    data = tomllib.loads(Path(__file__).with_name("prices.toml").read_text(encoding="utf-8"))
+    return {key: ModelPrice.model_validate(value) for key, value in data["prices"].items()}
+
+
 class Config(Record):
+    prices: dict[str, ModelPrice] = Field(default_factory=default_prices)
     provider: Literal["deepseek", "qwen"] = "deepseek"
     qwen_enable_thinking: bool = True
     qwen_thinking_budget: int = Field(default=1024, ge=128, le=8192)
@@ -34,7 +66,7 @@ class Config(Record):
     asr_secret_file: str | None = None
     asr_window_seconds: int = Field(default=30, ge=5, le=60)
     asr_max_calls: int = Field(default=500, ge=1, le=10000)
-    sample_seconds: int = Field(default=10, ge=1, le=120)
+    sample_seconds: int = Field(default=2, ge=1, le=120)
     chapter_seconds: int = Field(default=180, ge=30, le=600)
     max_images_per_chapter: int = Field(default=12, ge=1, le=30)
     image_change_threshold: float = Field(default=0.035, ge=0, le=1)

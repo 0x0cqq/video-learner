@@ -14,22 +14,43 @@ from video_learner.common.schemas import (
     NoteBlock,
     Notebook,
     ReviewItem,
+    TranscriptSegment,
 )
 from video_learner.common.storage import digest
 from video_learner.providers.base import Provider
 
 
-def plan_chapters(start_us: int, end_us: int, config: Config) -> list[Chapter]:
-    """预先划分连续覆盖目标区间的章节，尾章按结束时间截短，失败也保留其占位范围。"""
-    return [
-        Chapter(
-            id=f"ch-{index:03d}",
-            title=f"章节 {index}",
-            start_us=begin,
-            end_us=min(end_us, begin + config.chapter_seconds * US),
+def plan_chapters(
+    start_us: int,
+    end_us: int,
+    config: Config,
+    transcript: list[TranscriptSegment] | None = None,
+) -> list[Chapter]:
+    """按目标章长划分，在附近 20% 范围优先采用转写边界，避免同一切片跨章重复。
+
+    这只是连续证据分组，不声称停顿就是话题边界；过长或重叠字幕仍可按长度分组。
+    """
+    size = config.chapter_seconds * US
+    boundaries = sorted({s.end_us for s in transcript or []})
+    chapters = []
+    begin = start_us
+    while begin < end_us:
+        stop = min(end_us, begin + size)
+        if stop < end_us:
+            nearby = [b for b in boundaries if abs(b - stop) <= size // 5 and b < end_us]
+            if nearby:
+                stop = min(nearby, key=lambda b: abs(b - stop))
+        index = len(chapters) + 1
+        chapters.append(
+            Chapter(
+                id=f"ch-{index:03d}",
+                title=f"章节 {index}",
+                start_us=begin,
+                end_us=stop,
+            )
         )
-        for index, begin in enumerate(range(start_us, end_us, config.chapter_seconds * US), 1)
-    ]
+        begin = stop
+    return chapters
 
 
 def evidence_packet(
@@ -42,7 +63,7 @@ def evidence_packet(
 ) -> tuple[dict, list[tuple[str, Path]]]:
     """组装目标范围的可引用证据及受控本地图片路径，供转换或局部修订使用。
 
-    相邻十秒文本仅帮助理解，不携带可引用 ID；图片超限时均匀取样，避免丢掉章尾。
+    相邻十秒转写与上一章末尾仅帮助衔接，不可引用；图片超限时均匀取样，避免丢掉章尾。
     """
     context_start = max(book.start_us, chapter.start_us - 10 * US)
     context_end = min(book.end_us, chapter.end_us + 10 * US)
@@ -71,6 +92,14 @@ def evidence_packet(
         "allow_ai_additions": config.allow_ai_additions,
         "transcript": [s.model_dump() for s in segments],
         "adjacent_context_not_citable": context,
+        "previous_chapter_not_citable": next(
+            (
+                {"title": c.title, "ending": "\n".join(b.body for b in c.blocks)[-3000:]}
+                for c in reversed(book.chapters)
+                if c.end_us <= chapter.start_us and c.status == "completed"
+            ),
+            None,
+        ),
         "frames": [{"id": f.id, "at_us": f.at_us, "crop": f.crop} for f in frames],
         "current_markdown": current_markdown,
         "target_ids": target_ids,
@@ -100,8 +129,11 @@ def validate_draft(draft: Draft, packet: dict) -> None:
             if block.frame_id in selected_frames:
                 raise TaskError("同章重复使用同一个截图，请合并图片块")
             selected_frames.add(block.frame_id)
-        elif block.frame_id is not None:
-            raise TaskError("文字块不能指定图片")
+        else:
+            if block.frame_id is not None:
+                raise TaskError("文字块不能指定图片")
+            if not block.body.strip():
+                raise TaskError("文字块正文不能为空；图片无需图注时可用空正文")
         if block.evidence_ids:
             local = any(
                 identity in frames
@@ -127,7 +159,7 @@ def compose_chapter(
     root: Path,
     provider: Provider,
 ) -> None:
-    """调用供应商并校验草稿后更新章节，分配本地块 ID，再汇集疑点与缺图提示。"""
+    """调用供应商并校验草稿后更新章节，分配本地块 ID，再汇集具体疑点。"""
     packet, images = evidence_packet(book, chapter, config, root)
     draft = provider.compose(packet, images)
     validate_draft(draft, packet)
@@ -152,14 +184,6 @@ def compose_chapter(
     for reason in draft.review:
         book.review.append(
             ReviewItem(reason=reason, start_us=chapter.start_us, end_us=chapter.end_us)
-        )
-    if not any(b.kind == "figure" for b in chapter.blocks):
-        book.review.append(
-            ReviewItem(
-                reason="本章模型未选择截图，请核对是否遗漏关键画面",
-                start_us=chapter.start_us,
-                end_us=chapter.end_us,
-            )
         )
 
 

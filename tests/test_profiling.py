@@ -20,6 +20,7 @@ def test_stage_summary_does_not_double_count_or_mix_revisions():
     spec.loader.exec_module(module)
     records = [
         {"stage": "transcribe", "status": "completed", "seconds": 10},
+        {"stage": "plan_chapters", "status": "completed", "seconds": 1},
         {"stage": "asr_model_usage", "status": "received", "seconds": 8},
         {"stage": "audio_decode:audio-1", "status": "completed", "seconds": 2},
         {"stage": "model_usage", "status": "received", "call": 1, "seconds": 3},
@@ -31,7 +32,7 @@ def test_stage_summary_does_not_double_count_or_mix_revisions():
         {"stage": "model_usage", "status": "received", "call": 1, "seconds": 100},
     ]
     result = module.summarize_events(records)
-    assert result["stage_seconds_total"] == 21
+    assert result["stage_seconds_total"] == 22
     assert result["model_requests"]["sum_seconds"] == 10
     assert result["failed_model_seconds_measured"] == 5
     assert result["failed_model_requests_without_duration"] == 0

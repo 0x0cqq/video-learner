@@ -1,4 +1,5 @@
 # 仅包含公开配置；实际密钥使用环境变量或 --secret 文件。
+# 默认单价见 src/video_learner/common/prices.toml；自定义 prices 表会整体替换默认表。
 provider = "deepseek" # 改为 qwen 时，自动选择 qwen3.8-flash / DASHSCOPE_API_KEY。
 # model = "deepseek-v4-flash-vision-exp" # 可显式覆盖所选供应商的默认模型。
 # api_key_env = "DEEPSEEK_API_KEY"
@@ -9,11 +10,11 @@ allow_ai_additions = false
 asr_language = "zh"
 asr_qwen_model = "qwen3-asr-flash"
 asr_api_key_env = "DASHSCOPE_API_KEY"
-asr_window_seconds = 30 # 来源精确到音频切片区间，无句级时间戳。
+asr_window_seconds = 30 # 每片上限；末尾附近有停顿时提前切分，无句级时间戳。
 asr_max_calls = 500
 
-sample_seconds = 10
-chapter_seconds = 180
+sample_seconds = 2 # 明显切屏保留前一帧，另补周期帧和末帧。
+chapter_seconds = 180 # 目标章长，尽量对齐附近转写边界。
 max_images_per_chapter = 12
 image_change_threshold = 0.035
 # crop = [640, 0, 640, 410]

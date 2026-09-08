@@ -16,6 +16,7 @@ from video_learner.common.storage import (
     directory_lock,
     write_json,
 )
+from video_learner.common.usage import summarize_usage
 from video_learner.media.evidence import load_subtitles, sample_frames, save_transcript
 from video_learner.media.io import crop_image, extract_frame, inspect_source, source_file, track_of
 from video_learner.notes.composition import compose_chapter, plan_chapters, validate_notebook
@@ -64,6 +65,7 @@ def convert(
     subtitle: Path | None = None,
     progress: Callable[[str], None] | None = None,
     provider: Provider | None = None,
+    usage_report: Callable[[dict], None] | None = None,
 ) -> Path:
     """编排单视频转换，在独占锁内提取证据、组织章节并提交新输出目录。
 
@@ -107,7 +109,7 @@ def convert(
             "status": "running",
             "source_hash": None,
             "extraction_hash": extraction_hash(config),
-            "extraction_version": 2,
+            "extraction_version": 3,
             "prompt_version": PROMPT_VERSION,
             "config": config.model_dump(exclude={"secret_file", "asr_secret_file"}),
             "range": [start_us, end_us],
@@ -181,6 +183,10 @@ def convert(
                     )
             with events.stage("sample"):
                 book.frames = sample_frames(source_path, source, start_us, end_us, config, staging)
+            with events.stage("plan_chapters"):
+                book.chapters = plan_chapters(start_us, end_us, config, book.transcript)
+                manifest["chapters"] = [c.model_dump() for c in book.chapters]
+                write_json(contained(staging, ".work/manifest.json"), manifest)
             active_provider = provider or create_provider(config, events)
             for chapter in book.chapters:
                 try:
@@ -236,3 +242,10 @@ def convert(
                 if not target.exists():
                     staging.rename(target)
             raise
+        finally:
+            # 提交或失败移动目录后仍写入本次运行的用量，不混入以后修订的请求。
+            report = summarize_usage(events.usage_events, config)
+            folder = staging if staging.exists() else target
+            write_json(contained(folder, "usage.json"), report)
+            if usage_report:
+                usage_report(report)

@@ -54,6 +54,33 @@ def encode_wav(samples: np.ndarray) -> bytes:
     return buffer.getvalue()
 
 
+def pause_cut(samples: np.ndarray) -> int:
+    """在窗口最后 20% 找至少 300 毫秒的低音量区间，取最靠后的停顿中点。
+
+    使用 20 毫秒 RMS 和固定低音量阈值；无停顿或全段安静时保留完整窗口。
+    返回 16 kHz 采样位置，不删除静音，也不推断语义或词句时间。
+    """
+    step = 320
+    count = len(samples) // step
+    if count < 15:
+        return len(samples)
+    rms = np.sqrt(np.mean(samples[: count * step].reshape(count, step) ** 2, axis=1))
+    quiet = rms < 0.01
+    if quiet.all():
+        return len(samples)
+    run_start = None
+    cut = len(samples)
+    for index in range(int(count * 0.8), count + 1):
+        if index < count and quiet[index]:
+            if run_start is None:
+                run_start = index
+        elif run_start is not None:
+            if index - run_start >= 15:
+                cut = (run_start + index) // 2 * step
+            run_start = None
+    return cut
+
+
 class QwenASR:
     def __init__(self, config: Config, events: Events, client=None):
         """建立固定 DashScope 端点的独立 ASR 客户端；由本层统计实际请求及重试。"""
@@ -156,11 +183,26 @@ def transcribe_qwen(
     result = []
     size = config.asr_window_seconds * US
     try:
-        for index, begin in enumerate(range(start_us, end_us, size), 1):
+        begin, index = start_us, 0
+        while begin < end_us:
+            index += 1
             end = min(end_us, begin + size)
             identity = f"audio-{index:05d}"
             with events.stage(f"audio_decode:{identity}"):
                 samples = audio_window(path, source, begin, end)
+                # 最后一片直接覆盖结尾；其余窗口只向前缩短，不超过服务时长上限。
+                cut = pause_cut(samples) if end < end_us else len(samples)
+                shortened = cut < len(samples)
+                if shortened:
+                    end = begin + cut * US // 16000
+                samples = samples[:cut]
+                events.emit(
+                    "audio_boundary",
+                    "selected",
+                    start_us=begin,
+                    end_us=end,
+                    reason="pause" if shortened else "limit",
+                )
                 wav = encode_wav(samples)
                 filename = contained(root, f".work/audio/{identity}.wav")
                 atomic_bytes(filename, wav)
@@ -197,6 +239,7 @@ def transcribe_qwen(
                         raw_end_us=end,
                     )
                 )
+            begin = end
     finally:
         if owned_client:
             recognizer.client.close()

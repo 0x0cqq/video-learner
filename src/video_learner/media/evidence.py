@@ -176,40 +176,37 @@ def sample_frames(
     config: Config,
     root: Path,
 ) -> list[FrameEvidence]:
-    """固定间隔扫描画面，按变化、章节边界及周期保留候选，并写入采样诊断。
+    """扫描相邻画面，变化时保留切换前一帧，并每 30 秒及结尾补一张。
 
-    周期保留用于减少全局灰度差对细小板书变化的漏判；最终插图仍由模型选择。
+    末帧更可能包含写完的板书，但不保证完整或无遮挡；允许冗余，由模型选最终插图。
+    仅保存小缩略图用于比较，原帧按选定时刻重新提取。
     """
-    frames = []
+    selected_times = {start_us}
     previous = None
-    previous_chapter = -1
-    last_kept_us = None
+    previous_us = start_us
+    last_kept_us = start_us
     scan = []
-    for index, at_us in enumerate(range(start_us, end_us, config.sample_seconds * US), 1):
+    for at_us in range(start_us, end_us, config.sample_seconds * US):
         image, actual, _ = extract_frame(path, source, at_us, end_us)
         selected = crop_image(image, config.crop)
         thumbnail = np.asarray(selected.convert("L").resize((96, 54)), dtype=np.float32) / 255
         change = float(np.mean(np.abs(thumbnail - previous))) if previous is not None else 1.0
-        chapter = (at_us - start_us) // (config.chapter_seconds * US)
-        # 粉笔笔画可能只改变很少像素；即使整体相似，也周期保留候选供模型选择。
-        periodic = last_kept_us is None or at_us - last_kept_us >= 30 * US
-        keep = periodic or chapter != previous_chapter or change >= config.image_change_threshold
-        scan.append({"requested_us": at_us, "actual_us": actual, "change": change, "kept": keep})
-        if keep:
-            frames.append(
-                register_frame(
-                    path,
-                    source,
-                    at_us,
-                    end_us,
-                    root,
-                    f"frame-{index:06d}",
-                    config.crop,
-                )
-            )
-            previous = thumbnail
-            previous_chapter = chapter
-            last_kept_us = at_us
+        changed = previous is not None and change >= config.image_change_threshold
+        periodic = at_us - last_kept_us >= 30 * US
+        if changed or periodic:
+            selected_times.add(previous_us)
+            last_kept_us = previous_us
+        scan.append(
+            {"requested_us": at_us, "actual_us": actual, "change": change, "changed": changed}
+        )
+        previous, previous_us = thumbnail, at_us
+    selected_times.add(previous_us)
+    frames = [
+        register_frame(path, source, at_us, end_us, root, f"frame-{index:06d}", config.crop)
+        for index, at_us in enumerate(sorted(selected_times), 1)
+    ]
+    for item in scan:
+        item["kept"] = item["requested_us"] in selected_times
     write_json(contained(root, ".work/frame-scan.json"), {"samples": scan})
     write_json(contained(root, ".work/frames.json"), {"frames": [f.model_dump() for f in frames]})
     return frames
