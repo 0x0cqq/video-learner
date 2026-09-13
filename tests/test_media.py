@@ -103,6 +103,15 @@ def test_metadata_failure_does_not_mean_media_open_failure(video):
     assert source.diagnostics
 
 
+def test_cache_title_combines_course_and_lesson(video):
+    """泛化课时名需要课程上下文，相同课程/课时标题则不重复。"""
+    metadata = video.with_name("videoInfo.json")
+    metadata.write_text(json.dumps({"title": "1-1-1", "groupTitle": "抽象代数"}), encoding="utf-8")
+    assert inspect_source(video.parent).title == "抽象代数 · 1-1-1"
+    metadata.write_text(json.dumps({"title": "课程", "groupTitle": "课程"}), encoding="utf-8")
+    assert inspect_source(video.parent).title == "课程"
+
+
 def test_force_output_keeps_source_and_working_directory_protected(video):
     """强制覆盖仍拒绝源目录、工作目录及文件路径，避免递归删除重要输入。"""
     from pathlib import Path

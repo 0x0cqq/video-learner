@@ -12,6 +12,23 @@ from video_learner.notes.rendering import image_dependencies, locate
 from video_learner.workflows.revision import revise
 
 
+def test_display_title_improvement_keeps_existing_evidence_revisable(converted, monkeypatch):
+    """实际文件指纹不变时，标题展示改进不能把既有讲义误判成另一份素材。"""
+    from video_learner.media.io import inspect_source
+
+    root, _ = converted
+
+    def renamed(path):
+        """只改变探测器的展示标题，保留全部轨道和媒体身份。"""
+        return inspect_source(path).model_copy(update={"title": "课程 · 课时"})
+
+    monkeypatch.setattr("video_learner.workflows.revision.inspect_source", renamed)
+    destination = revise(
+        root, section="ch-001", instruction="压缩重复", provider=DeterministicProvider()
+    )
+    assert (destination / "notes.md").is_file()
+
+
 def test_image_replacement_preserves_user_caption_and_extra_text(converted):
     """换图只修改受控图片行；手改图注与附加来源说明逐字节保留，手改图片行则冲突。"""
     from video_learner.notes.rendering import AnchorConflict, render_block

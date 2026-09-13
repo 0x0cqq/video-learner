@@ -207,7 +207,10 @@ def revise(
         source = inspect_source(source_path)
         subtitle = Path(local_source["subtitle"]) if local_source.get("subtitle") else None
         fingerprints = fingerprint_source(source_path, source, subtitle)
-        if fingerprints != local_source["files"] or source != book.source:
+        # 标题是展示信息，媒体和元数据指纹已验证；改进标题组合不应使旧证据失效。
+        if fingerprints != local_source["files"] or source.model_dump(
+            exclude={"title"}
+        ) != book.source.model_dump(exclude={"title"}):
             raise InputError("源素材与基线不一致，请重新转换到独立目录")
         validate_notebook(book, root)
         if current != snapshot:

@@ -131,6 +131,28 @@ def validate_body(body: str) -> None:
         raise TaskError("模型正文包含受控锚点字符串")
 
 
+def normalize_headings(body: str) -> str:
+    """将模型正文中的一级/二级标题降为三级，保留围栏代码、引用和列表结构。
+
+    解析器定位真实标题，避免修改代码中的井号；Setext 标题转为 ATX，不为格式问题重试 API。
+    """
+    tokens = MARKDOWN.parse(body)
+    lines = body.splitlines(keepends=True)
+    for index in range(len(tokens) - 1, -1, -1):
+        token = tokens[index]
+        if token.type != "heading_open" or token.tag not in ("h1", "h2"):
+            continue
+        start, end = token.map
+        if token.markup.startswith("#"):
+            lines[start] = re.sub(r"#{1,2}(?=\s|$)", "###", lines[start], count=1)
+        else:
+            prefix = re.match(r"[ \t]*(?:>[ \t]*)*(?:(?:[-+*]|\d+[.)])[ \t]+)?", lines[start])[0]
+            title = tokens[index + 1].content.replace("\n", " ")
+            ending = "\n" if lines[end - 1].endswith("\n") else ""
+            lines[start:end] = [f"{prefix}### {title}{ending}"]
+    return "".join(lines)
+
+
 def inline_text(value: str) -> str:
     """压平换行并转义行内 Markdown 控制字符，用于标题和疑点等非正文文本。"""
     value = " ".join(value.splitlines())

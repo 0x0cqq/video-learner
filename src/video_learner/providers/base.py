@@ -303,6 +303,10 @@ class DeepSeekProvider:
                 )
                 draft = Draft.model_validate_json(response.output_text)
                 from video_learner.notes.composition import validate_draft
+                from video_learner.notes.rendering import normalize_headings
+
+                for block in draft.blocks:
+                    block.body = normalize_headings(block.body)
 
                 try:
                     validate_draft(draft, packet)

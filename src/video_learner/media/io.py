@@ -106,6 +106,9 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
             try:
                 data = json.loads(metadata.read_text(encoding="utf-8-sig"))
                 title = str(data.get("title") or data.get("name") or title)
+                group = data.get("groupTitle")
+                if isinstance(group, str) and group.strip() and group.strip() != title:
+                    title = f"{group.strip()} · {title}"
                 bvid = data.get("bvid")
                 complete = data.get("isCompleted")
                 if data.get("status") == "completed":
