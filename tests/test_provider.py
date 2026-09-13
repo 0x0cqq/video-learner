@@ -116,3 +116,16 @@ def test_context_rollover_and_revision_do_not_reuse_unrelated_history(tmp_path):
     provider.config.deepseek_context = "chapter"
     provider.compose(value, [])
     assert len(client.requests[-1]["input"]) == 1
+
+
+def test_semantic_repair_isolates_current_chapter_from_history(tmp_path):
+    """长历史导致错引时，修复轮去掉历史并列出当前允许 ID，仍计入原有调用预算。"""
+    second = VALID.replace("tr-1", "tr-2")
+    client = Client([response(), response(), response(second)])
+    provider = DeepSeekProvider(Config(max_retries=1), Events(tmp_path), client)
+    value = {**packet(), "operation": "convert"}
+    provider.compose(value, [])
+    provider.compose({**value, "transcript": [{**value["transcript"][0], "id": "tr-2"}]}, [])
+    assert len(client.requests[1]["input"]) == 3
+    assert len(client.requests[2]["input"]) == 1
+    assert '"tr-2"' in client.requests[2]["input"][0]["content"][-1]["text"]

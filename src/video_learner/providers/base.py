@@ -319,7 +319,18 @@ class DeepSeekProvider:
                     )
                     if attempt == self.config.max_retries:
                         raise
-                    repair = f"上次响应未通过语义校验：{exc}。请严格修复并重新输出完整 JSON。"
+                    if self.config.provider == "deepseek" and self._request_prefix:
+                        # 历史图文可能干扰当前引用；修复轮只给目标章，避免反复使用旧证据。
+                        self._request_prefix = []
+                        self._history = []
+                        self.events.emit("model_context", "reset", reason="validation")
+                    allowed = [s["id"] for s in packet["transcript"]] + [
+                        f["id"] for f in packet["frames"]
+                    ]
+                    repair = (
+                        f"上次响应未通过语义校验：{exc}。请重新输出完整 JSON。"
+                        f"本次唯一可引用的证据 ID：{json.dumps(allowed)}"
+                    )
                     self.events.emit(
                         "model_call",
                         "retrying",
