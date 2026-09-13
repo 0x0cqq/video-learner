@@ -14,7 +14,7 @@ P0 三条命令已实现：`inspect`、`convert`、`revise`。可将单视频转
 
 `convert --jobs N` 可并发 ASR 请求（默认 1），图文整理保持串行，见[ASR 并发](docs/usage.md#asr-并发)。转换和修订默认显示阶段进度，转换阶段结束附实际处理数量与耗时，`--verbose` 查看详细事件，见[终端显示说明](docs/usage.md#终端进度与详细日志)。转换结束自动显示 Token meter 和 Estimated 费用，并保存 `usage.json`，包括重试用量、未知部分和所用单价。默认价格来自用户提供的 Qwen 报价及 DeepSeek 公开价格快照，可通过 TOML 覆盖；见[计费配置](docs/usage.md#token-meter-与估算费用)。
 
-Windows 下离线测试、Ruff 和构建检查通过。新策略已用数学、编程各 4 分钟真实片段验证，并复验了图注精简、版本保护和独立复制；费用汇总也完成真实短片段验证。此前约 100 分钟编程课与约 45 分钟数学课的完整结果保留，本轮未重跑整课。语音识别默认使用阿里云 Qwen，可选本地 CPU/CUDA，来源精确到音频切片区间。测试数量、实际测量及人工验收限制统一见[验证记录](docs/validation.md)。
+Windows 下离线测试、Ruff 和构建检查通过。语音识别默认使用阿里云 Qwen，可选本地 CPU/CUDA，来源精确到音频切片区间。四个指定课时先使用一分钟片段测试，再各建立一次整课基线并进行学习者视角审阅；测试数量、实际测量及验收限制统一见[验证记录](docs/validation.md)。
 
 默认图文模型为 DeepSeek V4.1 Flash（`deepseek-flash`），转换以有界历史前缀争取缓存命中，实际用量已用四课短片段验证。可选本地 CPU/CUDA ASR 已在当前台式机完成一分钟样本 profiling；结果与质量限制见[性能分析](docs/performance.md#本地-asr-短片段测量)及[验证记录](docs/validation.md)。
 
@@ -28,6 +28,7 @@ Windows 下离线测试、Ruff 和构建检查通过。新策略已用数学、�
 - [AGENTS.md](AGENTS.md)：参与本项目的协作规则。
 - [使用指南](docs/usage.md)：安装、配置、转换、修订和错误处理。
 - [验证记录](docs/validation.md)：实际检查、真实样本与质量限制。
+- [内容质量记录](docs/content-quality.md)：整课阅读发现、具体修正与剩余疑点。
 - [性能分析](docs/performance.md)：整课耗时归因、cProfile 结果和复现方法。
 - [实现笔记与 ADR](docs/implementation-notes.md)：开发过程、实验和技术选择原因。
 
