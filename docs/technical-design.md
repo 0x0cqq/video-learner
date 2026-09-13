@@ -15,13 +15,13 @@
 | 应用 | workflows/conversion.py 编排转换，workflows/revision.py 编排修订；不依赖 Typer 对象 |
 | 媒体 | PyAV，只读偏移流、轨道探测、seek、音频重采样 |
 | 图片 | Pillow/NumPy，全帧灰度变化、周期候选覆盖 |
-| ASR | 阿里云 Qwen ASR，有界音频切片 |
+| ASR | 默认 Qwen，可选 faster-whisper CPU/CUDA，共用有界音频切片 |
 | 多模态 | DeepSeek deepseek-flash / Qwen qwen3.8-flash，窄 Provider.compose 接口 |
 | 文档 | Pydantic、确定性 Markdown 渲染、字节范围替换、Markdown 资源解析 |
 | 状态 | JSON、内容指纹、快照、临时目录、OS 文件锁 |
 | 验证 | pytest 自造媒体/模型替身、Ruff、独立真实样本评估 |
 
-代码按职责划分为 common（共享基础）、workflows（用例编排）、media（媒体与证据）、providers（云端模型）、notes（讲义组织与渲染）五个子包；根目录保留 cli.py。具体文件见[实现指南](implementation-guide.md#3-当前代码组织)。不建设空模块、通用插件框架、通用 Agent 引擎或后台服务。P1 才包含 SQLite、检查点、任务恢复、自主证据补查与复杂布局识别。
+代码按职责划分为 common（共享基础）、workflows（用例编排）、media（媒体与证据）、providers（模型适配）、notes（讲义组织与渲染）五个子包；根目录保留 cli.py。具体文件见[实现指南](implementation-guide.md#3-当前代码组织)。不建设空模块、通用插件框架、通用 Agent 引擎或后台服务。P1 才包含 SQLite、检查点、任务恢复、自主证据补查与复杂布局识别。
 
 ## 2. 导入与规范时间线
 
@@ -37,13 +37,13 @@
 
 ## 3. 固定证据提取
 
-音频按重采样 PTS 放回 16 kHz 单声道缓冲，保留静音、时间空隙和原课偏移。语音识别统一使用 Qwen，不提供本地模型、下载、VAD 或 GPU 推理路径。
+音频按重采样 PTS 放回 16 kHz 单声道缓冲，保留静音、时间空隙和原课偏移。语音识别默认 Qwen；显式 `asr_backend=local` 使用 faster-whisper。CPU 默认为 small/int8，CUDA 默认为 large-v3-turbo/int8_float16。两者通过 `recognize(wav, cancelled)` 与 `close()` 接口复用切片和保存流程，均按实际窗口引用。权重每次转写加载一次，按需下载；VAD 关闭，保留原始时间映射。CPU 的 `asr_cpu_threads` 控制算子线程，`jobs` 控制 CTranslate2 worker；CUDA 固定单 worker 控制显存。
 
 默认使用 `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`，模型默认为 `qwen3-asr-flash`。16 kHz PCM16 WAV 以 Base64 发送，每片默认上限 30 秒，可设 5–60 秒。除尾片外，在窗口末尾 20% 内寻找至少 300 毫秒的低音量停顿（20 毫秒 RMS < 0.01），在最靠后的停顿中点切分；无停顿或全窗安静则保留完整窗口。下一片从实际切点开始，不丢静音、不重叠。固定阈值不等于语音检测，也不保证词句完整。该接口没有句级时间戳，`TranscriptSegment.alignment=audio_window` 表示真实上传区间，精度说明放在 `sources.md`。原始波形、切片映射和响应保存在工作目录。凭据独立、最多 500 次 ASR 调用（含重试），认证/截断直接失败，瞬时错误有界重试；不自动回退其他云服务。[用户指定的 Qwen 接口](https://platform.qianwenai.com/docs/api-reference/speech-recognition/qwen-asr/openai)
 
 当前工作清单与讲义索引的结构版本为 2，提取版本为 4。每个截图证据只有一张完整帧缓存及其哈希。修订只接受当前数据版本并核对提取指纹，不加载或迁移旧结构；旧产物可独立阅读与复制，继续修订需重新转换到新目录。
 
-ASR 通过 `jobs` 控制有界请求并发，默认 1；切片生成和响应保存仍按原时间顺序，空转写也保留原始响应。调用编号和含重试的总预算在锁内分配，事件日志、用量记录与显示回调串行写入。失败或取消后停止派发及后续重试，等待在途请求结束再关闭客户端、移动工作目录。`jobs` 不影响提取指纹；图文整理仍按章节串行执行，上一章正文上下文保持原样。配置入口见[使用指南](usage.md#asr-并发)。
+ASR 通过 `jobs` 控制有界请求并发，默认 1；切片生成和响应保存仍按原时间顺序，空转写也保留原始响应。调用编号和含重试的总预算在锁内分配，事件日志、用量记录与显示回调串行写入。失败或取消后停止派发及后续重试，等待在途请求结束再关闭客户端、移动工作目录。`jobs` 和 CPU 线程数不影响提取指纹；本地模型、设备、beam 配置进入指纹，默认云端指纹保持稳定；图文整理仍按章节串行执行，上一章正文上下文保持原样。配置入口见[使用指南](usage.md#asr-并发)。
 
 原始转写不会被 LLM 改写覆盖。真实术语、分块边界和字幕同步仍需核对，不把合法时间戳视为识别准确的证明。SRT/VTT 检查格式、顺序、边界、有效文本和覆盖比例；必须显式选择，才替代 ASR。
 

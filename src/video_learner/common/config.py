@@ -60,6 +60,11 @@ class Config(Record):
     profile: Literal["programming", "math", "mixed"] = "mixed"
     instruction: str = ""
     allow_ai_additions: bool = False
+    asr_backend: Literal["qwen", "local"] = "qwen"
+    asr_device: Literal["cpu", "cuda"] = "cpu"
+    asr_local_model: str | None = None
+    asr_cpu_threads: int = Field(default=4, ge=1, le=64)
+    asr_beam_size: int = Field(default=1, ge=1, le=5)
     asr_language: str | None = "zh"
     asr_qwen_model: str = "qwen3-asr-flash"
     asr_api_key_env: str = Field(default="DASHSCOPE_API_KEY", pattern=r"^[A-Za-z_][A-Za-z_0-9]*$")

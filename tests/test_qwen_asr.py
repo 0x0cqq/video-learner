@@ -14,7 +14,7 @@ from video_learner.common.config import Config
 from video_learner.common.core import InputError, TaskError
 from video_learner.common.storage import Events
 from video_learner.media.io import inspect_source
-from video_learner.providers.asr import QwenASR, encode_wav, transcribe_qwen, validate_qwen_config
+from video_learner.providers.asr import QwenASR, encode_wav, transcribe, validate_qwen_config
 from video_learner.workflows.conversion import extraction_hash
 
 
@@ -76,7 +76,7 @@ def test_qwen_preserves_true_window_without_inventing_sentence_times(video, tmp_
 
     config = Config()
     progress = []
-    result = transcribe_qwen(
+    result = transcribe(
         video,
         inspect_source(video),
         1_000_000,
@@ -118,6 +118,9 @@ def test_default_conversion_uses_qwen_and_reports_missing_key(video, tmp_path, m
         def __init__(self, config, events):
             self.client = SimpleNamespace(close=lambda: None)
 
+        def close(self):
+            self.client.close()
+
         def recognize(self, wav, cancelled=None):
             calls.append(wav)
             return "测试语音"
@@ -158,7 +161,7 @@ def test_pause_cut_and_continuous_windows(video, tmp_path, monkeypatch, jobs):
             return "一段真实窗口的转写"
 
     monkeypatch.setattr("video_learner.media.evidence.audio_window", waveform)
-    result = transcribe_qwen(
+    result = transcribe(
         video,
         source,
         10_000_000,
@@ -200,7 +203,7 @@ def test_parallel_asr_preserves_order_and_empty_windows(video, tmp_path, monkeyp
             return str(identity)
 
     monkeypatch.setattr("video_learner.media.evidence.audio_window", waveform)
-    result = transcribe_qwen(
+    result = transcribe(
         video,
         source,
         0,

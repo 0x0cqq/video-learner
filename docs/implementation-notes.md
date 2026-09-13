@@ -356,3 +356,11 @@ uv run python tools/profile_conversion.py output/programming-full output/math-fu
 依据官方模型与价格页，将默认模型更新为 `deepseek-flash`，这是 V4.1 Flash 的正式 API 名称。当前高峰输入/缓存输入/输出每百万 token 分别为 2/0.04/8 元，沿用北京时间空闲时段半价规则。保留现有 Responses 适配和显式模型覆盖。旧名称的历史调用记录保留原样，本次没有为了改名额外发起付费请求。用户授权本轮按独立粒度提交，并重新允许可选本地 ASR；相关契约在实现阶段同步更新。
 
 来源：https://api-docs.deepseek.com/zh-cn/quick_start/pricing/ 、https://api-docs.deepseek.com/guides/responses_api/ 。
+
+## 2026-09-14：可选本地 ASR 与 CPU profiling
+
+按用户最新授权恢复本地 CPU/CUDA 路径，调整此前仅云端的约定。采用 faster-whisper/CTranslate2，仅增加 WAV → 文本的窄适配器，抽取现有切片流程作为两端共用的 `transcribe`；没有引入服务、插件框架或自动回退。保留真实窗口来源精度，关闭 VAD，不将模型估计时间提升为精确句级引用。CPU INT8 small 与 CUDA INT8/FP16 large-v3-turbo 分别服务低资源和较高质量需求。
+
+CTranslate2 释放 GIL，使用现有有界线程队列和 num_workers 即可利用 CPU；暂不增加多进程复制权重。叔本华一分钟对比显示 4 算子线程 × 2 worker 热运行 4.157 秒，比 4 × 1 的 6.203 秒快约 33%，且比 8 × 1 更快，因此给出可配置建议，保持全局 jobs=1 默认不变。数学术语仍有明显识别错误，不能以速度代替质量。增加可复用 profile_asr 工具，记录加载、CPU 时间、RSS 与整卡显存；Windows CUDA DLL 显式通过 PATH 配置并预检。12 项 ASR 相关离线测试通过；CUDA 实机验证待运行库安装后执行。
+
+依据：https://github.com/SYSTRAN/faster-whisper 、https://opennmt.net/CTranslate2/performance.html 。

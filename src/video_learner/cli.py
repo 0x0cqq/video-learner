@@ -70,6 +70,8 @@ def convert_command(
     config: Path | None = None,
     model: str | None = None,
     provider: Annotated[str | None, typer.Option(help="图文模型供应商 deepseek 或 qwen")] = None,
+    asr_backend: Annotated[str | None, typer.Option(help="ASR 后端 qwen 或 local")] = None,
+    asr_device: Annotated[str | None, typer.Option(help="本地 ASR 设备 cpu 或 cuda")] = None,
     asr_secret: Annotated[Path | None, typer.Option(help="Qwen ASR 的独立凭据文件")] = None,
     jobs: Annotated[
         int | None, typer.Option(min=1, max=32, help="ASR 并发数，默认 1；图文仍串行")
@@ -91,6 +93,8 @@ def convert_command(
         instruction=instruction,
         model=model,
         provider=provider,
+        asr_backend=asr_backend,
+        asr_device=asr_device,
         asr_secret_file=str(asr_secret) if asr_secret else None,
         jobs=jobs,
         secret_file=str(secret) if secret else None,

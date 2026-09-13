@@ -8,7 +8,12 @@ profile = "mixed"
 instruction = "保留关键概念、推导与操作步骤，压缩重复说明"
 allow_ai_additions = false
 
-asr_language = "zh"
+asr_backend = "qwen" # 可选 local；默认云端。
+asr_device = "cpu" # 本地可选 cuda，CUDA 使用 jobs=1。
+# asr_local_model = "small" # CPU 默认 small；CUDA 默认 large-v3-turbo；可填本地目录。
+asr_cpu_threads = 4 # 每个本地 worker 的算子线程数。
+asr_beam_size = 1
+asr_language = "zh" # 英文原声设为 en。
 asr_qwen_model = "qwen3-asr-flash"
 asr_api_key_env = "DASHSCOPE_API_KEY"
 # asr_secret_file = "secrets/aliyun.secret" # 同上；仅配置文件路径，不填写密钥值。

@@ -23,7 +23,7 @@ from video_learner.media.evidence import load_subtitles, sample_frames, save_tra
 from video_learner.media.io import inspect_source, source_file, track_of
 from video_learner.notes.composition import compose_chapter, plan_chapters, validate_notebook
 from video_learner.notes.rendering import export_book, render_notes
-from video_learner.providers.asr import transcribe_qwen, validate_qwen_config
+from video_learner.providers.asr import transcribe, validate_asr_config
 from video_learner.providers.base import (
     PROMPT_VERSION,
     Provider,
@@ -44,7 +44,19 @@ EXTRACTION_FIELDS = {
 
 def extraction_hash(config: Config) -> str:
     """只对影响证据提取的配置求指纹，允许修订时更换图文模型而复用原始证据。"""
-    return canonical_hash(config.model_dump(include=EXTRACTION_FIELDS))
+    fields = config.model_dump(include=EXTRACTION_FIELDS)
+    if config.asr_backend == "local":
+        fields.update(
+            config.model_dump(
+                include={
+                    "asr_backend",
+                    "asr_device",
+                    "asr_local_model",
+                    "asr_beam_size",
+                }
+            )
+        )
+    return canonical_hash(fields)
 
 
 def fingerprint_source(path: Path, source: Source, subtitle: Path | None = None) -> dict:
@@ -95,9 +107,14 @@ def convert(
     if provider is None:
         validate_provider_config(config)
     if subtitle_segments is None:
-        validate_qwen_config(config, start_us, end_us)
+        validate_asr_config(config, start_us, end_us)
     if force:
-        for dependency in (subtitle, config.secret_file, config.asr_secret_file):
+        for dependency in (
+            subtitle,
+            config.secret_file,
+            config.asr_secret_file,
+            config.asr_local_model,
+        ):
             if dependency and Path(dependency).resolve().is_relative_to(target):
                 raise InputError("字幕或凭据文件位于输出目录内，不能强制删除")
     # 锁放在输出目录旁，既不提前创建输出，也能与后续 revise 使用同一把锁。
@@ -159,7 +176,7 @@ def convert(
                 book.transcript = (
                     subtitle_segments
                     if subtitle_segments is not None
-                    else transcribe_qwen(
+                    else transcribe(
                         source_path,
                         source,
                         start_us,
@@ -173,7 +190,7 @@ def convert(
                 if any(s.alignment == "audio_window" for s in book.transcript):
                     book.review.append(
                         ReviewItem(
-                            reason="Qwen ASR 兼容接口不返回句级时间戳；语音来源为实际音频切片区间，"
+                            reason="语音来源按实际音频切片区间引用，"
                             "不是逐句对齐。切片边界可能截断词句，请结合原图和音频核对。",
                             start_us=start_us,
                             end_us=end_us,

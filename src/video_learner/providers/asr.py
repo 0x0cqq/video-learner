@@ -1,4 +1,4 @@
-"""阿里云 Qwen ASR 兼容接口；只返回切片文本，不捏造句级时间戳。"""
+"""共用切片转写流程与阿里云 Qwen 适配；来源按实际音频窗口引用。"""
 
 import base64
 import io
@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from contextlib import closing
 from pathlib import Path
 from threading import Event, Lock
+from typing import Protocol
 
 import numpy as np
 
@@ -18,6 +19,22 @@ from video_learner.common.core import US, InputError, TaskError, contained
 from video_learner.common.schemas import Source, TranscriptSegment
 from video_learner.common.storage import Events, atomic_bytes, write_json
 from video_learner.providers.base import credential
+
+
+class Recognizer(Protocol):
+    def recognize(self, wav: bytes, cancelled: Event | None = None) -> str: ...
+
+    def close(self) -> None: ...
+
+
+def validate_asr_config(config: Config, start_us: int, end_us: int) -> None:
+    """按显式后端预检；本地识别无需云端凭据，也不会在预检时下载权重。"""
+    if config.asr_backend == "qwen":
+        validate_qwen_config(config, start_us, end_us)
+    else:
+        from video_learner.providers.local_asr import validate_local_config
+
+        validate_local_config(config)
 
 
 def qwen_credential(config: Config) -> str:
@@ -101,6 +118,9 @@ class QwenASR:
                 timeout=config.request_timeout_seconds,
             )
         self.client = client
+
+    def close(self) -> None:
+        self.client.close()
 
     def recognize(self, wav: bytes, cancelled: Event | None = None) -> str:
         """发送一段 WAV 并返回完整转写文本；临时服务错误有界重试，不完整输出直接失败。
@@ -186,7 +206,7 @@ class QwenASR:
         raise TaskError("Qwen ASR 请求失败")
 
 
-def transcribe_qwen(
+def transcribe(
     path: Path,
     source: Source,
     start_us: int,
@@ -194,7 +214,7 @@ def transcribe_qwen(
     config: Config,
     root: Path,
     events: Events,
-    recognizer: QwenASR | None = None,
+    recognizer: Recognizer | None = None,
 ) -> list[TranscriptSegment]:
     """按原视频连续且不重叠的窗口识别，保存音频、时间映射和原始响应。
 
@@ -205,9 +225,15 @@ def transcribe_qwen(
     from video_learner.media.io import track_of
 
     if recognizer is None:
-        validate_qwen_config(config, start_us, end_us)
+        validate_asr_config(config, start_us, end_us)
     owned_client = recognizer is None
-    recognizer = recognizer or QwenASR(config, events)
+    if recognizer is None:
+        if config.asr_backend == "local":
+            from video_learner.providers.local_asr import LocalASR
+
+            recognizer = LocalASR(config, events)
+        else:
+            recognizer = QwenASR(config, events)
     result = []
     size = config.asr_window_seconds * US
     cancelled = Event()
@@ -299,5 +325,5 @@ def transcribe_qwen(
                 )
     finally:
         if owned_client:
-            recognizer.client.close()
+            recognizer.close()
     return result

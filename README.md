@@ -14,7 +14,7 @@ P0 三条命令已实现：`inspect`、`convert`、`revise`。可将单视频转
 
 `convert --jobs N` 可并发 ASR 请求（默认 1），图文整理保持串行，见[ASR 并发](docs/usage.md#asr-并发)。转换和修订默认显示阶段进度，转换阶段结束附实际处理数量与耗时，`--verbose` 查看详细事件，见[终端显示说明](docs/usage.md#终端进度与详细日志)。转换结束自动显示 Token meter 和 Estimated 费用，并保存 `usage.json`，包括重试用量、未知部分和所用单价。默认价格来自用户提供的 Qwen 报价及 DeepSeek 公开价格快照，可通过 TOML 覆盖；见[计费配置](docs/usage.md#token-meter-与估算费用)。
 
-Windows 下离线测试、Ruff 和构建检查通过。新策略已用数学、编程各 4 分钟真实片段验证，并复验了图注精简、版本保护和独立复制；费用汇总也完成真实短片段验证。此前约 100 分钟编程课与约 45 分钟数学课的完整结果保留，本轮未重跑整课。语音识别统一使用阿里云 Qwen，来源精确到音频切片区间。测试数量、实际测量及人工验收限制统一见[验证记录](docs/validation.md)。
+Windows 下离线测试、Ruff 和构建检查通过。新策略已用数学、编程各 4 分钟真实片段验证，并复验了图注精简、版本保护和独立复制；费用汇总也完成真实短片段验证。此前约 100 分钟编程课与约 45 分钟数学课的完整结果保留，本轮未重跑整课。语音识别默认使用阿里云 Qwen，可选本地 CPU/CUDA，来源精确到音频切片区间。测试数量、实际测量及人工验收限制统一见[验证记录](docs/validation.md)。
 
 ## 文档入口
 
@@ -46,6 +46,6 @@ uv run video-learner inspect "C:\Users\cqqqwq\Videos\bilibili\41301577497" --dec
 uv run video-learner convert "C:\Users\cqqqwq\Videos\bilibili\41301577497" --start 00:45:00 --end 00:55:00 --profile programming --asr-secret "C:\projects\video-learner\secrets\aliyun.secret" --secret "C:\projects\video-learner\secrets\deepseek.secret" --output "C:\projects\video-learner\output\my-notes"
 ```
 
-图文整理默认连接 DeepSeek `deepseek-flash`，凭据用 `DEEPSEEK_API_KEY` 或 `--secret`。转换和文字修订也可用 `--provider qwen` 选择阿里云 `qwen3.8-flash`，默认开启思考和流式响应，凭据用 `DASHSCOPE_API_KEY` 或 `--secret`。Qwen ASR 使用同一阿里云环境变量或独立的 `--asr-secret`。不调用 OpenAI 服务，无需安装本地识别模型；指定同步字幕可跳过云端识别。完整示例见[使用指南](docs/usage.md)。
+图文整理默认连接 DeepSeek `deepseek-flash`，凭据用 `DEEPSEEK_API_KEY` 或 `--secret`。转换和文字修订也可用 `--provider qwen` 选择阿里云 `qwen3.8-flash`，默认开启思考和流式响应，凭据用 `DASHSCOPE_API_KEY` 或 `--secret`。Qwen ASR 使用同一阿里云环境变量或独立的 `--asr-secret`。不调用 OpenAI 服务；云端路径无需本地权重，可选本地识别的安装见[使用指南](docs/usage.md#本地语音识别)。指定同步字幕可跳过云端识别。完整示例见[使用指南](docs/usage.md)。
 
 真实视频位于仓库外；`output/`、`artifacts/`、`secrets/` 和模型均不提交。每个成功版本的 `notes.md` 和 `assets/` 可一起复制；继续修订须保留完整工作目录。

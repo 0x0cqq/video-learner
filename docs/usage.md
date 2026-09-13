@@ -34,7 +34,7 @@ uv run video-learner convert "C:\Users\cqqqwq\Videos\bilibili\41301577497" --sta
 
 `--subtitle` 可指定 UTF-8 SRT/VTT 替代 ASR。字幕需时间合法、覆盖当前范围；覆盖比例写入工作记录，同步仍需人工核对。发现但未显式选择的字幕不会自动覆盖语音识别。
 
-默认使用阿里云 Qwen ASR，按原视频时间提取 16 kHz 单声道音频并发送云端识别；不安装或下载本地识别模型。
+默认使用阿里云 Qwen ASR，按原视频时间提取 16 kHz 单声道音频；也可用 `--asr-backend local --asr-device cpu|cuda` 选择本地识别，见下方安装配置。
 
 生成的根目录对应 r001：`notes.md`、`assets/`、`sources.md`、`review.md`、`source.json`、`transcript.jsonl`、`notes.json`。正文保留连贯解释与必要图片，图注可省略；来源区间、证据和修订 ID 集中在 `sources.md`。`.work/` 保存本机来源、指纹、原帧、音频窗口、生成快照、版本清单与日志。
 
@@ -51,6 +51,27 @@ Qwen 凭据也可用 `DASHSCOPE_API_KEY`，与 DeepSeek 凭据独立。端点固
 `chapter_seconds` 默认 180 秒，是目标章长。章节在目标切点前后 20% 内尽量对齐转写结束位置，减少同一音频片段跨章重复。停顿与转写边界不等于话题边界。
 
 该兼容接口不返回句级时间戳；来源明确标注为真实音频切片区间，切片边界可能截断词句。10 分钟数学音频实测转写约 32 秒，不是所有课程的固定性能。认证、调用上限和未完成输出会明确失败。识别设置进入提取指纹，修订时复用基线证据。工作目录的数据版本要求见下文精确换图说明。
+
+## 本地语音识别
+
+CPU 安装 `uv sync --extra local-asr`，运行时保留 `--extra local-asr` 或用 `--no-sync` 使用已同步环境。首次识别按需从 Hugging Face 下载权重；也可在 TOML 的 `asr_local_model` 指定已下载的 CTranslate2 模型目录。
+
+```powershell
+uv run --extra local-asr video-learner convert "C:\Users\cqqqwq\Videos\bilibili\550041191" --start 00:05:00 --end 00:06:00 --asr-backend local --asr-device cpu --jobs 2 --secret secrets/deepseek.secret --output output/schopenhauer
+```
+
+CPU 默认为多语种 small + int8，`asr_cpu_threads=4`、`asr_beam_size=1`；`jobs` 控制共用窗口队列与 CTranslate2 worker。算子释放 GIL，线程能够利用多个 CPU 核心，无需多进程重复加载模型。建议先比较 4 线程 × 1 worker、8 × 1 和 4 × 2；过多线程会争抢 CPU，结果以本机 profiling 为准。英文原声课程将 `asr_language` 设为 `en`。
+
+CUDA 默认为多语种 large-v3-turbo + int8_float16、单 worker（`jobs=1`）。已安装 CUDA 12/cuDNN 9 时可直接使用；Windows 也可通过可选依赖安装运行库，再显式设置当前 PowerShell 的 DLL 搜索路径：
+
+```powershell
+uv sync --extra local-asr --extra local-cuda
+$cudaBins = @("$PWD/.venv/Lib/site-packages/nvidia/cublas/bin", "$PWD/.venv/Lib/site-packages/nvidia/cudnn/bin", "$PWD/.venv/Lib/site-packages/nvidia/cuda_nvrtc/bin")
+$env:PATH = ($cudaBins -join ';') + ';' + $env:PATH
+uv run --no-sync video-learner convert "C:\Users\cqqqwq\Videos\bilibili\550041191" --start 00:05:00 --end 00:06:00 --asr-backend local --asr-device cuda --secret secrets/deepseek.secret --output output/schopenhauer-cuda
+```
+
+云端仍为默认，两种本地配置均复用原有 WAV 切片、停顿边界、顺序落盘、取消收尾与证据校验；来源精度为真实音频窗口。每次任务加载一次模型，缺少依赖、权重或 CUDA 库时明确失败。本地推理不产生 ASR API 费用，电力和硬件成本未纳入 Token meter；图文整理仍使用所选云服务。显存占用随模型、音频及设备变化，测量方法与已验证范围见[性能分析](performance.md#本地-asr-短片段测量)。
 
 ## Qwen 图文理解
 

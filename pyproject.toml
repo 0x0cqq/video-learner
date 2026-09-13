@@ -22,8 +22,22 @@ dependencies = [
 [project.scripts]
 video-learner = "video_learner.cli:main"
 
+[project.optional-dependencies]
+local-asr = [
+    "faster-whisper>=1.2,<2",
+]
+local-cuda = [
+    "nvidia-cublas-cu12>=12,<13",
+    "nvidia-cudnn-cu12>=9,<10",
+]
+
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.12"]
+dev = [
+    "nvidia-ml-py>=13.610.43",
+    "psutil>=7.2.2",
+    "pytest>=8",
+    "ruff>=0.12",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
