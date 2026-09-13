@@ -90,6 +90,7 @@ def evidence_packet(
         "chapter_id": chapter.id,
         "start_us": chapter.start_us,
         "end_us": chapter.end_us,
+        "is_last_chapter": chapter.end_us == book.end_us,
         "profile": config.profile,
         "instruction": config.instruction,
         "allow_ai_additions": config.allow_ai_additions,

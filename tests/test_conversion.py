@@ -85,6 +85,35 @@ def test_offline_conversion_exports_references_and_versions(converted):
     assert "blk-001-001" in sources and "tr-000001" in sources
 
 
+def test_editorial_export_preserves_baseline_and_rejects_changed_evidence(converted, tmp_path):
+    """人工审阅独立导出且零模型调用；原证据或基线手改变化时拒绝发布。"""
+    import importlib.util
+
+    path = Path(__file__).parents[1] / "tools/export_review.py"
+    spec = importlib.util.spec_from_file_location("export_review", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    root, _ = converted
+    original = (root / "notes.md").read_bytes()
+    book = Notebook.model_validate_json((root / "notes.json").read_text(encoding="utf-8"))
+    book.chapters[0].blocks[0].body = "经人工整理的说明。"
+    edited = tmp_path / "edited.json"
+    edited.write_text(book.model_dump_json(), encoding="utf-8")
+    target = module.export_review(root, edited, tmp_path / "reviewed")
+    assert (root / "notes.md").read_bytes() == original
+    assert "经人工整理" in (target / "notes.md").read_text(encoding="utf-8")
+    assert not (target / ".work/manifest.json").exists()
+    for reference in image_dependencies((target / "notes.md").read_bytes()):
+        assert (target / reference).is_file()
+    book.transcript[0].text = "改写原始转写"
+    edited.write_text(book.model_dump_json(), encoding="utf-8")
+    with pytest.raises(InputError, match="不得改变原始证据"):
+        module.export_review(root, edited, tmp_path / "bad-evidence")
+    (root / "notes.md").write_bytes(original + b"\nmanual edit\n")
+    with pytest.raises(InputError, match="有手改"):
+        module.export_review(root, edited, tmp_path / "bad-manual")
+
+
 def test_force_cli_replaces_old_output(converted, monkeypatch):
     """显式 -f 删除整个旧输出并完成新转换；没有该参数时旧内容必须保留。"""
     from typer.testing import CliRunner

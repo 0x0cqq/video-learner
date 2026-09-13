@@ -171,3 +171,20 @@ V4.1 Flash 的 API 名称为 `deepseek-flash`。默认 `deepseek_context="histor
 [官方缓存规则](https://api-docs.deepseek.com/guides/kv_cache/)采用完整前缀单元匹配，缓存是尽力而为，不能保证命中。追加历史会增加上传体积与累计输入量，因此有缓存不等于一定更便宜。1M 是模型上下文能力；一门课能否放下还取决于截图数、分辨率对应 token、讲义输出和 HTTP 请求体大小，先用默认预算观察实际命中即可。
 
 讲义按知识关系使用连贯段落、三级小标题和必要的并列比较表；论点与依据、条件与结论通过简短语句连接。章节无固定栏目数量，少量新增内容保持简短，原课未说明的解释归待核对或显式授权的 AI 补充。精度和来源仍集中于独立索引。
+
+
+## 低成本审阅与独立校订稿
+
+先通读现成 notes.md，对照 sources.md 找到原转写和图片，记录问题类型、章节/块 ID、具体疑点及处理结果。分组边界不一定是话题边界，先查看后章是否已有完整论证。来源窗口保持原样；图文矛盾或原课缺少条件时明确标为待核对。
+
+需要模型重新组织时，使用 tools/replay_composition.py 冻结证据，一次最多三章，默认仅离线准备；只有 --live 才付费。复用方法见[性能分析](performance.md#冻结证据回放)。长历史造成引用校验失败时，程序在已有重试预算内隔离为当前章重新请求。
+
+本地文字、标题和已确认事实的校订可编辑 notes.json 的副本，再运行：
+
+```powershell
+uv run --no-sync python tools/export_review.py output/sample artifacts/review/edited.json --output output/sample-reviewed
+```
+
+该开发工具不调用模型，要求原证据、时间与章节范围保持不变，全部章节完成并通过引用校验；基线 Markdown 有手改时先停止，避免遗漏手改。输出为独立的 notes.md、assets、sources.md、review.md 与结构化索引，保留原基线。此阅读副本不登记 convert/revise 版本；继续使用 CLI 修订成功转换基线时，仍按原 revise 流程操作。
+
+当前四课的具体问题、处理结果与剩余限制见[内容质量记录](content-quality.md)。
