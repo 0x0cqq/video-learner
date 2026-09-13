@@ -27,3 +27,9 @@ ASR 的并发设置见[使用指南](usage.md#asr-并发)，图文整理保持�
 同样使用 4 × 2，抽象代数、CS336 的 05:00–06:00，以及软件工程的 45:00–46:00，首次转写分别为 5.907、3.891、4.063 秒。模型加载约 1.6–2.3 秒，以上推理耗时包含解码与落盘。只测试所列四课，不外推整课性能。具体片段和质量边界见[验证记录](validation.md)。
 
 CUDA 实测采用 RTX 4070 系列 12GB、CUDA 12/cuDNN 9、large-v3-turbo/int8_float16、单 worker。同样四段音频的首次推理为 1.531、1.593、1.031、1.437 秒；叔本华热运行 1.375 秒，实时率 0.023。模型加载约 3.7–4.9 秒，进程 RSS 峰值约 2GiB；100 ms 采样的整卡显存峰值为 5.37–5.90GiB（包含约 4GiB 桌面及其他进程）。本机短片段达到低于 8GB 的占用目标；未在物理显存小于 8GB 的显卡或整课上验收。CPU 与 CUDA 使用不同模型，速度对比包含模型差异。
+
+## 冻结证据回放
+
+`uv run python tools/replay_composition.py output/sample --output artifacts/replay/example --sections ch-001 ch-002` 默认只准备原有证据包，不创建模型客户端。加 `--live --secret secrets/deepseek.secret` 才发送指定章节；每次最多三章、无重试。`--context chapter|history` 比较独立逐章与完整历史策略。新输出保存 packet、draft 和 usage，输入讲义及其证据保持只读，不重复 ASR 或媒体采样。
+
+真实小范围对照数据见[验证记录](validation.md#固定证据的缓存对照)。缓存节省应同时观察未命中输入、已命中输入、输出长度及总费用；高命中率本身不是净省费证明。
