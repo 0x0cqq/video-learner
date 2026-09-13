@@ -77,6 +77,9 @@ class Config(Record):
     max_images_per_chapter: int = Field(default=12, ge=1, le=30)
     image_change_threshold: float = Field(default=0.035, ge=0, le=1)
     model: str = "deepseek-flash"
+    deepseek_context: Literal["history", "chapter"] = "history"
+    context_token_budget: int = Field(default=200_000, ge=16_000, le=900_000)
+    context_max_megabytes: int = Field(default=40, ge=1, le=40)
     api_key_env: str = Field(default="DEEPSEEK_API_KEY", pattern=r"^[A-Za-z_][A-Za-z_0-9]*$")
     secret_file: str | None = None
     max_calls: int = Field(default=80, ge=1, le=1000)

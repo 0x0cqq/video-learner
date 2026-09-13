@@ -85,3 +85,34 @@ def test_incomplete_output_is_not_repeated_with_same_limit(tmp_path):
     with pytest.raises(TaskError, match="未完成"):
         provider.compose(packet(), [])
     assert len(client.requests) == 1
+
+
+def test_history_preserves_exact_successful_prefix_and_rejects_old_evidence(tmp_path):
+    """追加实际成功输入/输出，历史有证据也不能绕过当前章的引用边界。"""
+    client = Client([response(), response(), response()])
+    provider = DeepSeekProvider(Config(max_retries=0), Events(tmp_path), client)
+    first = {**packet(), "operation": "convert"}
+    provider.compose(first, [])
+    provider.compose(first, [])
+    assert client.requests[1]["input"][:1] == client.requests[0]["input"]
+    assert client.requests[1]["input"][1] == {"role": "assistant", "content": VALID}
+    changed = {**first, "transcript": [{**first["transcript"][0], "id": "tr-2"}]}
+    with pytest.raises(TaskError, match="以外"):
+        provider.compose(changed, [])
+    assert len(provider._history) == 4
+
+
+def test_context_rollover_and_revision_do_not_reuse_unrelated_history(tmp_path):
+    """历史超预算时整组重置；修订为独立请求，关闭历史时保持逐章行为。"""
+    client = Client([response(), response(), response(), response()])
+    provider = DeepSeekProvider(Config(context_token_budget=24000), Events(tmp_path), client)
+    value = {**packet(), "operation": "convert", "instruction": "x" * 1500}
+    provider.compose(value, [])
+    provider._history[1]["content"] = "x" * 24000
+    provider.compose(value, [])
+    assert len(client.requests[-1]["input"]) == 1
+    provider.compose({**value, "operation": "revise"}, [])
+    assert len(client.requests[-1]["input"]) == 1
+    provider.config.deepseek_context = "chapter"
+    provider.compose(value, [])
+    assert len(client.requests[-1]["input"]) == 1

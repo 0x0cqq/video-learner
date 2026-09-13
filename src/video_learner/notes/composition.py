@@ -40,6 +40,9 @@ def plan_chapters(
             nearby = [b for b in boundaries if abs(b - stop) <= size // 5 and b < end_us]
             if nearby:
                 stop = min(nearby, key=lambda b: abs(b - stop))
+            # 极短尾章容易把半句话扩写成整节；合并仍保留完整连续范围。
+            if end_us - stop <= size // 5:
+                stop = end_us
         index = len(chapters) + 1
         chapters.append(
             Chapter(

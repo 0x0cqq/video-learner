@@ -141,6 +141,8 @@ def display_usage(report: dict) -> None:
     console.print(table)
     total = report["input_tokens"] + report["output_tokens"]
     console.print(f"已记录 token：{total:,}；详细用量和计价配置：usage.json")
+    cached = sum(row["cached_input_tokens"] for row in report["models"])
+    console.print(f"缓存命中输入：{cached:,} token（已包含在输入用量中）")
     if report["missing_token_usage"]:
         console.print(f"另有 {report['missing_token_usage']} 次请求缺少完整 token 用量。")
     if any(row["unknown_cache_requests"] for row in report["models"]):

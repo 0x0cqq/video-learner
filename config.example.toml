@@ -26,6 +26,9 @@ chapter_seconds = 180 # 目标章长，尽量对齐附近转写边界。
 max_images_per_chapter = 12
 image_change_threshold = 0.035
 
+deepseek_context = "history" # 完整追加已成功章节；chapter 为独立逐章请求。
+context_token_budget = 200000 # 保守预算，包含输出预留；不是实际计费 token。
+context_max_megabytes = 40 # 请求体上限，达到边界后新建上下文组。
 reasoning_effort = "none"
 qwen_enable_thinking = true
 qwen_thinking_budget = 1024

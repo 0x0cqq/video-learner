@@ -304,3 +304,21 @@ def test_injected_model_path_rejected(video, tmp_path):
         convert(
             video, tmp_path / "injected", Config(), subtitle=subtitle, provider=InjectedProvider()
         )
+
+
+def test_short_tail_is_folded_into_last_chapter():
+    """转写停顿不能把最后四秒半句话独立变成一章，范围仍连续完整。"""
+    from video_learner.common.schemas import TranscriptSegment
+    from video_learner.notes.composition import plan_chapters
+
+    segments = [
+        TranscriptSegment(
+            id=f"tr-{i}", start_us=a * 1_000_000, end_us=b * 1_000_000, text="语音", origin="asr"
+        )
+        for i, (a, b) in enumerate([(300, 327), (327, 356), (356, 360)])
+    ]
+    chapters = plan_chapters(300_000_000, 360_000_000, Config(chapter_seconds=30), segments)
+    assert [(c.start_us, c.end_us) for c in chapters] == [
+        (300_000_000, 327_000_000),
+        (327_000_000, 360_000_000),
+    ]

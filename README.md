@@ -16,6 +16,8 @@ P0 三条命令已实现：`inspect`、`convert`、`revise`。可将单视频转
 
 Windows 下离线测试、Ruff 和构建检查通过。新策略已用数学、编程各 4 分钟真实片段验证，并复验了图注精简、版本保护和独立复制；费用汇总也完成真实短片段验证。此前约 100 分钟编程课与约 45 分钟数学课的完整结果保留，本轮未重跑整课。语音识别默认使用阿里云 Qwen，可选本地 CPU/CUDA，来源精确到音频切片区间。测试数量、实际测量及人工验收限制统一见[验证记录](docs/validation.md)。
 
+默认图文模型为 DeepSeek V4.1 Flash（`deepseek-flash`），转换以有界历史前缀争取缓存命中，实际用量已用四课短片段验证。可选本地 CPU/CUDA ASR 已在当前台式机完成一分钟样本 profiling；结果与质量限制见[性能分析](docs/performance.md#本地-asr-短片段测量)及[验证记录](docs/validation.md)。
+
 ## 文档入口
 
 源码按 `common`、`workflows`、`media`、`providers`、`notes` 分组，CLI 入口保留在包根目录；目录职责见[代码组织](docs/implementation-guide.md#3-当前代码组织)。

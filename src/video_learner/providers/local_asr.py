@@ -30,7 +30,8 @@ def validate_local_config(config: Config) -> None:
         try:
             # 提前报告缺失 DLL，避免原生推理库在首次卷积时直接终止进程。
             for name in ("cublas64_12.dll", "cudnn64_9.dll"):
-                ctypes.WinDLL(name)
+                # 与 CTranslate2 的 LoadLibrary 使用同一 PATH 搜索规则。
+                ctypes.WinDLL(name, winmode=0)
         except OSError:
             raise InputError(
                 "CUDA 需要 CUDA 12/cuDNN 9 DLL；请按 docs/usage.md 将运行库 bin 加入 PATH"

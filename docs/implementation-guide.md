@@ -233,3 +233,5 @@ M2–M4 的尾部采样、嵌套代码围栏与修订疑点关联已有离线回
 开发侧性能检查可运行 `uv run python tools/profile_conversion.py output/programming-full output/math-full --report-dir artifacts/profiling/my-run --local`，输出目录必须是新目录。它分析既有日志并离线回放本地阶段，不新增 P0 命令、不发模型请求；逐函数结果和计时限制见[性能分析](performance.md)。
 
 默认 DeepSeek 已对齐官方 V4.1 Flash API 名称 `deepseek-flash` 和 2026-09-14 价格快照；本次升级先执行离线适配与计费检查，真实短片段验证单独记录。
+
+DeepSeek 转换默认逐轮追加已成功的原始请求（含图片）与回答，完整保留前缀；修订和 Qwen 保持独立请求。历史只用于术语和承接，引用校验仍仅允许当前包的证据。默认保守上下文预算 200K token、请求体预算 40 MiB，含输出及修复预留；到达边界整组重置，依靠包内上章末尾继续衔接。`deepseek_context=chapter` 可关闭历史。模型用量保留实际缓存 token；估计量只用于边界控制。当前提示词强调概念关系、短段落、文科论证与证据约束，避免为少量材料填充长文；剩余不足目标章长 20% 的尾段合入末章。

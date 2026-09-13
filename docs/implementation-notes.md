@@ -364,3 +364,23 @@ uv run python tools/profile_conversion.py output/programming-full output/math-fu
 CTranslate2 释放 GIL，使用现有有界线程队列和 num_workers 即可利用 CPU；暂不增加多进程复制权重。叔本华一分钟对比显示 4 算子线程 × 2 worker 热运行 4.157 秒，比 4 × 1 的 6.203 秒快约 33%，且比 8 × 1 更快，因此给出可配置建议，保持全局 jobs=1 默认不变。数学术语仍有明显识别错误，不能以速度代替质量。增加可复用 profile_asr 工具，记录加载、CPU 时间、RSS 与整卡显存；Windows CUDA DLL 显式通过 PATH 配置并预检。12 项 ASR 相关离线测试通过；CUDA 实机验证待运行库安装后执行。
 
 依据：https://github.com/SYSTRAN/faster-whisper 、https://opennmt.net/CTranslate2/performance.html 。
+
+## 2026-09-14：CUDA 实机与追加上下文
+
+Windows CUDA 预检最初用 ctypes 默认 DLL 搜索方式，未使用用户配置的 PATH；按 CTranslate2 的 LoadLibrary 规则改成显式 winmode=0 后通过。四段 GPU 实测完成，峰值整卡显存低于 6GiB。数学专有名词仍可能错识，不能宣称 GPU 自动解决术语质量。
+
+依据 DeepSeek 2026-09-14 文档，缓存匹配需要完整前缀单元；采用成功 user/assistant 消息原样追加，保留实际修复提示与原始最终 JSON。边界以 200K 保守 token 和 40 MiB 请求体控制，超限后整组重置；不做模型摘要请求，不引入服务器会话或 Files API。当前包的证据校验阻止历史引用泄漏。第一轮叔本华 60 秒、3 次调用的缓存输入为 0、3200、4736，总估价 0.010602 元，证明追加路径可以命中，尚不证明比独立逐章便宜。
+
+该试运行暴露 4 秒尾章被扩写、静态图重复及文科概念的无依据扩展，随后合并不超过目标章长 20% 的尾段，并加强短段落、证据支持与重复图片规则。27 项转换/图文适配离线测试通过，再仅用四课各 60 秒复验最终提示，不进行整课 API 测试。
+
+## 2026-09-14：Bilibili ID 与 Video Report Agent 调研（仅调研）
+
+用户明确要求该项不进入实现。下载依赖的短暂安装已移除，配置与锁文件清理完成；现有三条 CLI 与本地输入范围保持不变。
+
+只有 BVID 时仍需取得视频/音频或可靠字幕。可先查已有缓存的 videoInfo.json，以 BVID 与分 P 定位（同一 BV 可能对应多个课时）；没有本地媒体时，可在工具外通过官方客户端缓存或 yt-dlp 获取公开单视频，再交给现有 CLI。URL 的 `?p=` 应保留，BVID 本身不足以唯一指定合集中哪一 P。登录、地区、风控和字幕可用性都会影响下载；ID 本身不包含可转写内容。字幕可用时成本最低，但公式、板书与操作演示仍需画面证据。未来若授权下载入口，宜与转换隔离并生成普通本地输入，不将站点逻辑嵌入模型或证据模块。本轮没有真实下载或新增入口。
+
+参考项目当前 README 描述的主线是转写 → Coding Agent/Skill → 自包含 HTML；完整 Web 流程用 yt-dlp、FFmpeg，ASR 内置 MLX 与云端 Paraformer，可粘贴公开 Bilibili URL/BV 并选择分 P。值得借鉴其自包含阅读呈现、论点组织和字幕复用入口。我们现有可验证的差异是原帧和时间证据、图文联合整理、目标范围修订与非目标手改字节保护、可携带版本，以及本机 Windows CPU/CUDA profiling。它们对应理工课笔记长期核对与修订的需求；目前内容重复与越过证据的扩展仍明显，不能仅凭功能表声称输出更好。
+
+“视频转阅读材料”是共同的问题空间；相似项目出现不等于本项目失去价值。优先把学习者能否按讲义理解过程、回到依据并低成本修正做扎实，用同片段盲读与问题记录比较结果，避免为差异化扩展前端、问答或通用 Agent 引擎。
+
+来源：https://github.com/imexlovery/video-report-agent 、https://github.com/yt-dlp/yt-dlp 。
