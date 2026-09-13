@@ -221,6 +221,50 @@ def test_anchor_fences_and_conflicts(converted):
         locate(data.replace(b"<!-- vl:end block blk-001-001 -->", b""))
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "- ```python\n  print(1)\n  ```",
+        "> ```python\n> print(1)\n> ```",
+        "1. 示例\n\n   ~~~python\n   print(1)\n   ~~~~",
+    ],
+)
+def test_nested_code_blocks_convert_and_revise(video, tmp_path, body):
+    """合法嵌套代码须通过完整导出；含 CRLF 手改的版本继续修订时保留非目标字节。"""
+    from video_learner.workflows.revision import revise
+
+    class CodeProvider(DeterministicProvider):
+        def compose(self, packet, images):
+            """把合法的列表或引用代码作为模型正文，覆盖校验与导出使用不同解析规则的风险。"""
+            draft = super().compose(packet, images)
+            draft.blocks[0].body = body
+            return draft
+
+    subtitle = video.with_suffix(".srt")
+    subtitle.write_text("1\n00:00:00,000 --> 00:00:04,000\n测试\n", encoding="utf-8")
+    root = convert(video, tmp_path / "code", Config(), subtitle=subtitle, provider=CodeProvider())
+    path = root / "notes.md"
+    before = path.read_bytes().replace(b"\n", b"\r\n")
+    path.write_bytes(before)
+    old = locate(before)["fig-001-002"]
+    revised = revise(root, block="fig-001-002", at_us=1_000_000)
+    after = (revised / "notes.md").read_bytes()
+    new = locate(after)["fig-001-002"]
+    assert before[: old.start] == after[: new.start]
+    assert before[old.end :] == after[new.end :]
+
+
+@pytest.mark.parametrize(
+    "body", ["```", "```python\nprint(1)", "- ```python\n  print(1)", "> ~~~\n> code"]
+)
+def test_unclosed_fences_fail_before_export(body):
+    """不完整围栏应在模型正文校验阶段失败，避免消耗后续章节请求后才在导出时报错。"""
+    from video_learner.notes.rendering import validate_body
+
+    with pytest.raises(TaskError, match="代码围栏未闭合"):
+        validate_body(body)
+
+
 def test_invalid_model_reference_is_partial_not_success(video, tmp_path):
     """让结构合法的草稿引用不存在的证据，确认只保留部分诊断且不登记成功版本。"""
 

@@ -198,6 +198,62 @@ def test_caption_revision_keeps_the_existing_frame(converted):
     assert revised["chapters"][0]["blocks"][1]["frame_id"] == selected
 
 
+def test_text_revisions_refresh_only_target_review_items(converted):
+    """连续换图、单块和章节改写后清理旧疑点；范围外及字幕全局提示保留，新疑点有有效目标。"""
+    root, _ = converted
+    second = revise(root, block="fig-001-002", at_us=2_250_000)
+    baseline = Notebook.model_validate_json((second / "notes.json").read_text(encoding="utf-8"))
+    globals_before = [item for item in baseline.review if item.block_id is None]
+    assert globals_before
+
+    class Rewrite:
+        def __init__(self, uncertain):
+            self.uncertain = uncertain
+
+        def compose(self, packet, images):
+            """单块阶段返回正文疑点但空 review，章节阶段删除图片并提供新章节提示。"""
+            return Draft(
+                title="修订",
+                blocks=[
+                    DraftBlock(
+                        kind="text",
+                        body="待核对的正文" if self.uncertain else "已重新整理的正文",
+                        category="uncertain" if self.uncertain else "original",
+                        evidence_ids=[packet["transcript"][0]["id"]],
+                        frame_id=None,
+                    )
+                ],
+                review=[] if self.uncertain else ["新的章节疑点"],
+            )
+
+    third = revise(
+        root, base="r002", block="blk-001-001", instruction="核对正文", provider=Rewrite(True)
+    )
+    book = Notebook.model_validate_json((third / "notes.json").read_text(encoding="utf-8"))
+    assert [item for item in book.review if item.block_id != "blk-001-001"] == baseline.review
+    assert any(item.block_id == "blk-001-001" for item in book.review)
+    fourth = revise(
+        root, base="r003", section="ch-001", instruction="只保留正文", provider=Rewrite(False)
+    )
+    final = Notebook.model_validate_json((fourth / "notes.json").read_text(encoding="utf-8"))
+    assert [item for item in final.review if item.block_id is None] == globals_before
+    scoped = [item for item in final.review if item.block_id is not None]
+    assert [(item.block_id, item.reason) for item in scoped] == [("ch-001", "新的章节疑点")]
+    assert "fig-001-002" not in (fourth / "review.md").read_text(encoding="utf-8")
+
+
+def test_review_rejects_unknown_target(converted):
+    """导出前拒绝悬空的疑点关联，防止成功版本的核对清单指向不存在的章节或块。"""
+    from video_learner.common.core import TaskError
+    from video_learner.notes.composition import validate_notebook
+
+    root, _ = converted
+    book = Notebook.model_validate_json((root / "notes.json").read_text(encoding="utf-8"))
+    book.review[0].block_id = "deleted-block"
+    with pytest.raises(TaskError, match="未知章节或块"):
+        validate_notebook(book, root)
+
+
 def test_revision_can_switch_multimodal_provider_without_reextracting(converted, monkeypatch):
     """捕获修订工厂配置，验证切换 Qwen 可复用既有证据且目标章节外字节保持不变。"""
     root, _ = converted

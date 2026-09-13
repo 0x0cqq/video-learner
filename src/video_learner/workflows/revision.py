@@ -22,7 +22,12 @@ from video_learner.common.storage import (
 )
 from video_learner.media.evidence import register_frame
 from video_learner.media.io import inspect_source
-from video_learner.notes.composition import evidence_packet, validate_draft, validate_notebook
+from video_learner.notes.composition import (
+    chapter_review,
+    evidence_packet,
+    validate_draft,
+    validate_notebook,
+)
 from video_learner.notes.rendering import (
     AnchorConflict,
     copy_dependencies,
@@ -287,6 +292,11 @@ def revise(
                         images = [(pinned.id, contained(root, pinned.path))]
                     draft = active_provider.compose(packet, images)
                     validate_draft(draft, packet)
+                    replaced_ids = (
+                        {target_chapter.id, *(b.id for b in target_chapter.blocks)}
+                        if section
+                        else {target_block.id}
+                    )
                     if target_block:
                         if len(draft.blocks) != 1 or draft.blocks[0].kind != target_block.kind:
                             raise TaskError("单块修订必须返回一个相同类型的块")
@@ -330,15 +340,11 @@ def revise(
                         target_chapter.blocks = new_blocks
                         # 保留原章节标题，使目标外的目录也无需改写。
                         replacement = render_chapter(target_chapter, book).rstrip(b"\n") + b"\n"
-                    for reason in draft.review:
-                        book.review.append(
-                            ReviewItem(
-                                reason=reason,
-                                start_us=target_chapter.start_us,
-                                end_us=target_chapter.end_us,
-                                block_id=target_id,
-                            )
-                        )
+                    # 仅重建文字替换范围的疑点；无目标关联的音频、字幕等全局提示保留。
+                    book.review = [
+                        item for item in book.review if item.block_id not in replaced_ids
+                    ]
+                    book.review.extend(chapter_review(target_chapter, draft.review, target_id))
                 new_current = current[: span.start] + replacement + current[span.end :]
                 validate_notebook(book, root)
                 expected_spans(new_current, book)

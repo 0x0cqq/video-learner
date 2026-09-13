@@ -249,19 +249,26 @@ def extract_frame(
     source: Source,
     at_us: int,
     end_us: int | None = None,
+    *,
+    fallback_start_us: int | None = None,
 ) -> tuple[Image.Image, int, int]:
     """返回 [at_us, end_us) 内首个有效画面、实际规范微秒时间和原始 PTS。
 
     先 seek 到目标之前的关键帧再顺序解码，不能将请求时间冒充实际解码时间。
+    自动采样可提供 fallback_start_us：没有后续帧时返回该下界内的最后一帧。
+    精确换图不启用此选项；解码错误仍直接报告。
     """
     stop = source.duration_us if end_us is None else end_us
     if not 0 <= at_us < stop <= source.duration_us:
         raise InputError("抽帧时间越界")
+    if fallback_start_us is not None and not 0 <= fallback_start_us <= at_us:
+        raise InputError("采样回取下界越界")
     track = track_of(source, "video")
     with open_media(source_file(path, track)) as (container, _):
         stream = container.streams[track.index]
         target_pts = int(Fraction(at_us + source.origin_us, US) / stream.time_base)
         container.seek(target_pts, stream=stream, backward=True, any_frame=False)
+        previous = None
         for frame in container.decode(stream):
             if frame.pts is None:
                 continue
@@ -272,4 +279,11 @@ def extract_frame(
                 if frame.is_corrupt:
                     raise TaskError("目标画面损坏")
                 return frame.to_image(), actual, frame.pts
+            if fallback_start_us is not None and actual >= fallback_start_us:
+                previous = (frame, actual)
+        if previous is not None:
+            frame, actual = previous
+            if frame.is_corrupt:
+                raise TaskError("目标画面损坏")
+            return frame.to_image(), actual, frame.pts
     raise TaskError("请求区间没有可用视频帧")

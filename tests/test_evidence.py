@@ -2,10 +2,10 @@ import numpy as np
 import pytest
 
 from video_learner.common.config import Config
-from video_learner.common.core import InputError
+from video_learner.common.core import InputError, TaskError
 from video_learner.common.storage import directory_lock
 from video_learner.media.evidence import audio_window, load_subtitles, sample_frames
-from video_learner.media.io import inspect_source
+from video_learner.media.io import extract_frame, inspect_source
 
 
 def test_audio_resampling_preserves_silence_and_clip_offset(video):
@@ -51,6 +51,23 @@ def test_sampling_and_os_lock(video, tmp_path):
         pass
 
 
+@pytest.mark.parametrize("end_us", [4_000_000, 3_980_000])
+def test_sampling_tail_preserves_actual_frame_time(video, tmp_path, end_us):
+    """最后采样点晚于片段内最后一帧时使用该帧；原请求、PTS 和精确换图语义仍可核对。"""
+    source = inspect_source(video)
+    frames = sample_frames(video, source, 1_950_000, end_us, Config(), tmp_path / "tail")
+    assert [(f.requested_us, f.at_us) for f in frames] == [
+        (1_950_000, 2_000_000),
+        (3_950_000, 3_900_000),
+    ]
+    _, actual, pts = extract_frame(video, source, 3_900_000, end_us)
+    assert (frames[-1].at_us, frames[-1].pts) == (actual, pts)
+    with pytest.raises(TaskError, match="没有可用视频帧"):
+        extract_frame(video, source, 3_950_000, end_us)
+    with pytest.raises(TaskError, match="没有可用视频帧"):
+        sample_frames(video, source, 3_950_000, end_us, Config(), tmp_path / "empty")
+
+
 def test_small_temporary_board_change_retains_candidate(video, tmp_path, monkeypatch):
     """重现细小符号被灰度均差忽略的情形，确认周期候选仍覆盖符号短暂出现的区间。"""
     from fractions import Fraction
@@ -60,7 +77,7 @@ def test_small_temporary_board_change_retains_candidate(video, tmp_path, monkeyp
     description = inspect_source(video)
     description.duration_us = 90_000_000
 
-    def board(path, source, at_us, end_us):
+    def board(path, source, at_us, end_us, *, fallback_start_us=None):
         """模拟只在 40–70 秒出现八像素符号的板书，并返回与原轨道 time base 一致的 PTS。"""
         image = Image.new("RGB", (160, 96), "darkgreen")
         if 40_000_000 <= at_us < 70_000_000:
@@ -84,7 +101,7 @@ def test_sampling_keeps_board_before_page_turn(video, tmp_path, monkeypatch):
     source = inspect_source(video)
     source.duration_us = 20_000_000
 
-    def board(path, source, at_us, end_us):
+    def board(path, source, at_us, end_us, *, fallback_start_us=None):
         """前八秒逐行写字，十四秒换白色新页；细笔画不触发整屏变化阈值。"""
         image = Image.new("RGB", (160, 96), "darkgreen" if at_us < 14_000_000 else "white")
         if at_us < 14_000_000:

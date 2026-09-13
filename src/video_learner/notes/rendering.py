@@ -42,33 +42,23 @@ def locate(data: bytes) -> dict[str, Span]:
     避免重新排版后定位而破坏 CRLF、手改文字及非目标字节。
     """
     try:
-        data.decode("utf-8")
+        text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise AnchorConflict("当前 Markdown 不是 UTF-8，请先另存为 UTF-8") from exc
     offset = 0
-    fence = None
+    # 与正文校验共用 Markdown 语法，包含列表、引用内的围栏及缩进代码。
+    code_lines = {
+        line
+        for token in MARKDOWN.parse(text)
+        if token.type in ("fence", "code_block") and token.map is not None
+        for line in range(*token.map)
+    }
     stack = []
     spans = {}
     seen = set()
-    for line in data.splitlines(keepends=True):
+    for number, line in enumerate(data.splitlines(keepends=True)):
         stripped = line.rstrip(b"\r\n")
-        opening = re.match(rb"^ {0,3}(`{3,}|~{3,})(.*)$", stripped)
-        if fence:
-            if (
-                opening
-                and opening[1][:1] == fence[:1]
-                and len(opening[1]) >= len(fence)
-                and not opening[2].strip()
-            ):
-                fence = None
-            offset += len(line)
-            continue
-        if opening:
-            if opening[1].startswith(b"~") or b"`" not in opening[2]:
-                fence = opening[1]
-            offset += len(line)
-            continue
-        if stripped.startswith((b"    ", b"\t")):
+        if number in code_lines:
             offset += len(line)
             continue
         match = ANCHOR.fullmatch(stripped)
@@ -122,13 +112,11 @@ def validate_body(body: str) -> None:
     """
     if re.search(r"\b\d{1,3}:\d{2}:\d{2}\b", body):
         raise TaskError("模型正文不得生成视频时间戳；请只提供证据 ID")
-    for token in MARKDOWN.parse(body):
+    for token in MARKDOWN.parse(body + "\n"):
         if token.type == "fence":
-            lines = body.splitlines()
-            closing = lines[token.map[1] - 1].strip()
-            if not re.fullmatch(
-                re.escape(token.markup[0]) + "{" + str(len(token.markup)) + ",}", closing
-            ):
+            # 闭合围栏比正文多首尾两行；补末尾换行使未闭合正文也能准确计数。
+            # 使用解析后的内容，避免把列表、引用前缀误当作围栏的一部分。
+            if token.map[1] - token.map[0] != token.content.count("\n") + 2:
                 raise TaskError("模型正文的代码围栏未闭合")
         if token.type in ("html_block", "html_inline"):
             raise TaskError("模型正文不得包含 HTML 或锚点")

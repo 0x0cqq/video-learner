@@ -170,9 +170,20 @@ def compose_chapter(
         identity = f"{prefix}-{chapter.id[3:]}-{index:03d}"
         chapter.blocks.append(NoteBlock(**block.model_dump(), id=identity, chapter_id=chapter.id))
     chapter.status = "completed"
+    book.review.extend(chapter_review(chapter, draft.review))
+
+
+def chapter_review(
+    chapter: Chapter, reasons: list[str], target_id: str | None = None
+) -> list[ReviewItem]:
+    """汇集目标章节或单块的疑点，给正文疑点和模型提示登记可校验的修订目标。"""
+    target_id = target_id or chapter.id
+    items = []
     for block in chapter.blocks:
+        if target_id != chapter.id and block.id != target_id:
+            continue
         if block.category == "uncertain":
-            book.review.append(
+            items.append(
                 ReviewItem(
                     reason="待核对内容：" + block.body[:300],
                     start_us=chapter.start_us,
@@ -181,10 +192,16 @@ def compose_chapter(
                     evidence_ids=block.evidence_ids,
                 )
             )
-    for reason in draft.review:
-        book.review.append(
-            ReviewItem(reason=reason, start_us=chapter.start_us, end_us=chapter.end_us)
+    for reason in reasons:
+        items.append(
+            ReviewItem(
+                reason=reason,
+                start_us=chapter.start_us,
+                end_us=chapter.end_us,
+                block_id=target_id,
+            )
         )
+    return items
 
 
 def validate_notebook(book: Notebook, root: Path) -> None:
@@ -246,3 +263,5 @@ def validate_notebook(book: Notebook, root: Path) -> None:
             raise TaskError("待核对项时间越界")
         if not set(item.evidence_ids) <= evidence.keys():
             raise TaskError("待核对项引用未知证据")
+        if item.block_id is not None and item.block_id not in identities:
+            raise TaskError("待核对项引用未知章节或块")

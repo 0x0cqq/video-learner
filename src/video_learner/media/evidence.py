@@ -173,6 +173,7 @@ def sample_frames(
 
     末帧更可能包含写完的板书，但不保证完整或无遮挡；允许冗余，由模型选最终插图。
     仅保存小缩略图用于比较，原帧按选定时刻重新提取。
+    尾部无后续帧时使用范围内最后有效帧；同一实际帧只登记一次，保留首次请求时间。
     """
     selected_times = {start_us}
     previous = None
@@ -181,7 +182,7 @@ def sample_frames(
     scan = []
     times = range(start_us, end_us, config.sample_seconds * US)
     for scanned, at_us in enumerate(times, 1):
-        image, actual, _ = extract_frame(path, source, at_us, end_us)
+        image, actual, _ = extract_frame(path, source, at_us, end_us, fallback_start_us=start_us)
         thumbnail = np.asarray(image.convert("L").resize((96, 54)), dtype=np.float32) / 255
         change = float(np.mean(np.abs(thumbnail - previous))) if previous is not None else 1.0
         changed = previous is not None and change >= config.image_change_threshold
@@ -196,11 +197,17 @@ def sample_frames(
         if events:
             events.emit("scan_frames", "progress", completed=scanned, total=len(times))
     selected_times.add(previous_us)
+    selected = {}
+    for item in scan:
+        if item["requested_us"] in selected_times:
+            selected.setdefault(item["actual_us"], item["requested_us"])
     frames = []
-    for index, at_us in enumerate(sorted(selected_times), 1):
-        frames.append(register_frame(path, source, at_us, end_us, root, f"frame-{index:06d}"))
+    for index, (actual_us, requested_us) in enumerate(sorted(selected.items()), 1):
+        frame = register_frame(path, source, actual_us, end_us, root, f"frame-{index:06d}")
+        frame.requested_us = requested_us
+        frames.append(frame)
         if events:
-            events.emit("save_frames", "progress", completed=index, total=len(selected_times))
+            events.emit("save_frames", "progress", completed=index, total=len(selected))
     for item in scan:
         item["kept"] = item["requested_us"] in selected_times
     write_json(contained(root, ".work/frame-scan.json"), {"samples": scan})
