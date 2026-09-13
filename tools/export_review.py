@@ -7,7 +7,7 @@ from pathlib import Path
 from video_learner.common.config import Config
 from video_learner.common.core import InputError, output_path
 from video_learner.common.schemas import Draft, Notebook
-from video_learner.common.storage import read_json
+from video_learner.common.storage import directory_lock, read_json
 from video_learner.notes.composition import evidence_packet, validate_draft, validate_notebook
 from video_learner.notes.rendering import export_book, render_notes
 
@@ -18,6 +18,14 @@ def export_review(root: Path, edited: Path, output: Path) -> Path:
     target = output_path(root, output)
     baseline = Notebook.model_validate(read_json(root / "notes.json"))
     book = Notebook.model_validate(read_json(edited))
+    local_source = Path(read_json(root / ".work/source-local.json")["path"]).resolve()
+    media_root = local_source.parent if baseline.source.adapter == "local" else local_source
+    if (
+        target == media_root
+        or target.is_relative_to(media_root)
+        or media_root.is_relative_to(target)
+    ):
+        raise InputError("审阅输出目录不能与原媒体目录重叠")
     if (root / "notes.md").read_bytes() != render_notes(baseline):
         raise InputError("基线 Markdown 有手改，请先显式合并到校订稿，避免遗漏手改")
     for key in ("source", "transcript", "frames", "start_us", "end_us"):
@@ -47,10 +55,13 @@ def export_review(root: Path, edited: Path, output: Path) -> Path:
         )
         validate_draft(draft, packet)
     validate_notebook(book, root)
-    staging = target.with_name(f".{target.name}.review-{uuid.uuid4().hex}")
-    staging.mkdir(parents=True, exist_ok=False)
-    export_book(book, root, staging)
-    staging.rename(target)
+    with directory_lock(target.parent / f".{target.name}.lock"):
+        if output_path(root, output) != target:
+            raise InputError("审阅输出路径在校验后发生变化")
+        staging = target.with_name(f".{target.name}.review-{uuid.uuid4().hex}")
+        staging.mkdir(parents=True, exist_ok=False)
+        export_book(book, root, staging)
+        staging.rename(target)
     return target
 
 

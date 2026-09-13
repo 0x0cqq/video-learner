@@ -89,11 +89,13 @@ def test_editorial_export_preserves_baseline_and_rejects_changed_evidence(conver
     """人工审阅独立导出且零模型调用；原证据或基线手改变化时拒绝发布。"""
     import importlib.util
 
+    from video_learner.common.storage import directory_lock
+
     path = Path(__file__).parents[1] / "tools/export_review.py"
     spec = importlib.util.spec_from_file_location("export_review", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    root, _ = converted
+    root, video = converted
     original = (root / "notes.md").read_bytes()
     book = Notebook.model_validate_json((root / "notes.json").read_text(encoding="utf-8"))
     book.chapters[0].blocks[0].body = "经人工整理的说明。"
@@ -105,6 +107,11 @@ def test_editorial_export_preserves_baseline_and_rejects_changed_evidence(conver
     assert not (target / ".work/manifest.json").exists()
     for reference in image_dependencies((target / "notes.md").read_bytes()):
         assert (target / reference).is_file()
+    with pytest.raises(InputError, match="原媒体目录"):
+        module.export_review(root, edited, video.parent / "reviewed")
+    with directory_lock(tmp_path / ".locked.lock"):
+        with pytest.raises(InputError, match="正在写入"):
+            module.export_review(root, edited, tmp_path / "locked")
     book.transcript[0].text = "改写原始转写"
     edited.write_text(book.model_dump_json(), encoding="utf-8")
     with pytest.raises(InputError, match="不得改变原始证据"):
