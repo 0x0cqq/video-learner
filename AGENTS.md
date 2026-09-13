@@ -4,7 +4,7 @@
 
 用户已授权按照实现指南实现第一阶段 P0。可在该范围内创建业务代码、测试、包配置与锁文件、安装依赖、运行模型及转换验证。实现后同步更新 README 的状态和指南中的里程碑记录，区分代码完成与实际验收结果。
 
-实现过程、实验与 ADR 记录到 `docs/implementation-notes.md`；技术和用户文档仅维护当前最终状态，不记录尝试和回滚。图文整理支持用户指定的 DeepSeek `deepseek-v4-flash-vision-exp` 和阿里云 Qwen `qwen3.8-flash`；语音识别通过阿里云 DashScope 调用 `qwen3-asr-flash`。Qwen 图文默认启用思考和流式响应，只将最终正文交给结构校验与渲染。不得调用 OpenAI API，`openai` SDK 仅作为以上两家服务的兼容客户端。独立凭据文件为被忽略的 `secrets/deepseek.secret` 和 `secrets/aliyun.secret`，不得显示、记录或提交密钥值。Qwen ASR 返回的全文仅按真实音频切片区间引用，不捏造句级时间戳。
+实现过程、实验与 ADR 记录到 `docs/implementation-notes.md`；技术和用户文档仅维护当前最终状态，不记录尝试和回滚。图文整理支持用户指定的 DeepSeek `deepseek-flash` 和阿里云 Qwen `qwen3.8-flash`；语音识别通过阿里云 DashScope 调用 `qwen3-asr-flash`。Qwen 图文默认启用思考和流式响应，只将最终正文交给结构校验与渲染。不得调用 OpenAI API，`openai` SDK 仅作为以上两家服务的兼容客户端。独立凭据文件为被忽略的 `secrets/deepseek.secret` 和 `secrets/aliyun.secret`，不得显示、记录或提交密钥值。Qwen ASR 返回的全文仅按真实音频切片区间引用，不捏造句级时间戳。
 
 ## 阅读顺序与范围
 

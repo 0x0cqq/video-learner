@@ -191,7 +191,7 @@ P1 增强：用户用自然语言要求重新选图，由 AI 自主搜索相应�
 
 ## 5. 使用流程
 
-以下命令在项目目录通过 uv 运行；示例使用完整路径和 PowerShell 单行命令。转换需要所选图文供应商凭据，未提供字幕时还需 Qwen ASR 凭据；独立检查和精确换图不需要模型凭据。DeepSeek 默认模型为 deepseek-v4-flash-vision-exp；`--provider qwen` 默认使用 qwen3.8-flash 和 DASHSCOPE_API_KEY，完整示例见[使用指南](usage.md)。
+以下命令在项目目录通过 uv 运行；示例使用完整路径和 PowerShell 单行命令。转换需要所选图文供应商凭据，未提供字幕时还需 Qwen ASR 凭据；独立检查和精确换图不需要模型凭据。DeepSeek 默认模型为 deepseek-flash；`--provider qwen` 默认使用 qwen3.8-flash 和 DASHSCOPE_API_KEY，完整示例见[使用指南](usage.md)。
 
 ```powershell
 uv run video-learner inspect "C:\Users\cqqqwq\Videos\bilibili\41301577497" --decode

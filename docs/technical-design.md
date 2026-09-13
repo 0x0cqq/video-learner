@@ -16,7 +16,7 @@
 | 媒体 | PyAV，只读偏移流、轨道探测、seek、音频重采样 |
 | 图片 | Pillow/NumPy，全帧灰度变化、周期候选覆盖 |
 | ASR | 阿里云 Qwen ASR，有界音频切片 |
-| 多模态 | DeepSeek deepseek-v4-flash-vision-exp / Qwen qwen3.8-flash，窄 Provider.compose 接口 |
+| 多模态 | DeepSeek deepseek-flash / Qwen qwen3.8-flash，窄 Provider.compose 接口 |
 | 文档 | Pydantic、确定性 Markdown 渲染、字节范围替换、Markdown 资源解析 |
 | 状态 | JSON、内容指纹、快照、临时目录、OS 文件锁 |
 | 验证 | pytest 自造媒体/模型替身、Ruff、独立真实样本评估 |
@@ -55,7 +55,7 @@ ASR 通过 `jobs` 控制有界请求并发，默认 1；切片生成和响应保
 
 供应商返回的草稿由 `Draft` / `DraftBlock` 定义，响应 JSON schema 从该契约派生；正文通过结构和证据校验后再转成带稳定 ID 的讲义块。
 
-图文整理通过 `provider` 选择 DeepSeek 或 Qwen，不调用 OpenAI 服务或自动回退。`openai` 包作为两家服务的兼容客户端。默认 DeepSeek `deepseek-v4-flash-vision-exp`，固定连接 `https://api.deepseek.com`。[DeepSeek 图像接口](https://api-docs.deepseek.com/guides/vision/)
+图文整理通过 `provider` 选择 DeepSeek 或 Qwen，不调用 OpenAI 服务或自动回退。`openai` 包作为两家服务的兼容客户端。默认 DeepSeek `deepseek-flash`，固定连接 `https://api.deepseek.com`。[DeepSeek 图像接口](https://api-docs.deepseek.com/guides/vision/)
 
 DeepSeek 使用 Responses API 图像输入和 JSON schema 响应。Qwen 使用 Chat Completions，固定连接 `https://dashscope.aliyuncs.com/compatible-mode/v1`，默认 `qwen3.8-flash`；图片以 Base64 `image_url` 发送，schema 同时写入请求格式和系统提示。两者均执行 Pydantic 及跨字段校验。text 块的 frame_id 必须为 null；figure 块必须引用本次提供的 frame ID 并将其包含在证据列表中。同章不重复导出同一截图。模型不能控制本地路径、HTML 锚点或来源时间戳。[DeepSeek Responses API](https://api-docs.deepseek.com/api/create-response/)
 

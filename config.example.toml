@@ -1,7 +1,7 @@
 # 仅包含公开配置；实际密钥使用环境变量或 --secret 文件。
 # 默认单价见 src/video_learner/common/prices.toml；自定义 prices 表会整体替换默认表。
 provider = "deepseek" # 改为 qwen 时，自动选择 qwen3.8-flash / DASHSCOPE_API_KEY。
-# model = "deepseek-v4-flash-vision-exp" # 可显式覆盖所选供应商的默认模型。
+# model = "deepseek-flash" # 可显式覆盖所选供应商的默认模型。
 # api_key_env = "DEEPSEEK_API_KEY"
 # secret_file = "secrets/deepseek.secret" # 文件优先于环境变量；路径相对于运行目录。
 profile = "mixed"

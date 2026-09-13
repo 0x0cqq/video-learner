@@ -350,3 +350,9 @@ uv run python tools/profile_conversion.py output/programming-full output/math-fu
 - 转换和文字修订共用疑点收集逻辑，模型提示关联章节或块。文字修订替换目标范围的疑点，保留范围外和无目标关联的提示；导出校验关联目标存在。数据字段与版本保持不变，不迁移旧工作目录。
 
 实际验证：增加 11 项回归用例，全量 102 项测试通过（14.53 秒），Ruff 检查与格式检查通过。只使用自造媒体和模型替身，未调用课程转换模型、未读取真实课程素材，也未重新构建安装包。当前验证状态见 [validation.md](validation.md)。
+
+## 2026-09-14：默认 DeepSeek V4.1 Flash
+
+依据官方模型与价格页，将默认模型更新为 `deepseek-flash`，这是 V4.1 Flash 的正式 API 名称。当前高峰输入/缓存输入/输出每百万 token 分别为 2/0.04/8 元，沿用北京时间空闲时段半价规则。保留现有 Responses 适配和显式模型覆盖。旧名称的历史调用记录保留原样，本次没有为了改名额外发起付费请求。用户授权本轮按独立粒度提交，并重新允许可选本地 ASR；相关契约在实现阶段同步更新。
+
+来源：https://api-docs.deepseek.com/zh-cn/quick_start/pricing/ 、https://api-docs.deepseek.com/guides/responses_api/ 。

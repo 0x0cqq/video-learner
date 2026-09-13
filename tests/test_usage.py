@@ -71,12 +71,12 @@ def test_cache_price_requires_usage_and_does_not_add_tokens_twice():
 
 def test_deepseek_prices_follow_beijing_request_start():
     """用 UTC 请求时间覆盖高峰、午休和周末，缓存折扣与时段折扣各只应用一次。"""
-    price = Config().prices["deepseek:deepseek-v4-flash-vision-exp"]
+    price = Config().prices["deepseek:deepseek-flash"]
     usage = {"input_tokens": 1000, "output_tokens": 100, "cached_input_tokens": 200}
     for utc, expected in [
-        ("2026-09-09T01:00:00+00:00", 0.00332),
-        ("2026-09-09T04:00:00+00:00", 0.00166),
-        ("2026-09-12T01:00:00+00:00", 0.00166),
+        ("2026-09-09T01:00:00+00:00", 0.002408),
+        ("2026-09-09T04:00:00+00:00", 0.001204),
+        ("2026-09-12T01:00:00+00:00", 0.001204),
     ]:
         assert request_cost({**usage, "started_at": utc}, price) == pytest.approx(expected)
 

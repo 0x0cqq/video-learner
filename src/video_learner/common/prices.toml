@@ -1,11 +1,11 @@
-# 2026-09-09 价格快照，单位为人民币。可在用户 TOML 中用 prices 表替换。
+# 2026-09-14 价格快照，单位为人民币。可在用户 TOML 中用 prices 表替换。
 # DeepSeek：https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
 # 下列为高峰价；北京时间工作日 9–12、14–18 点以外乘以 0.5。
-[prices."deepseek:deepseek-v4-flash-vision-exp"]
+[prices."deepseek:deepseek-flash"]
 currency = "CNY"
-input_per_million = 3.0
-cached_input_per_million = 0.1
-output_per_million = 9.0
+input_per_million = 2.0
+cached_input_per_million = 0.04
+output_per_million = 8.0
 deepseek_off_peak_multiplier = 0.5
 
 # Qwen 图文来自用户提供的价格截图，采用普通同步请求价格。

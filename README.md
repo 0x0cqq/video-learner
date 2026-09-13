@@ -46,6 +46,6 @@ uv run video-learner inspect "C:\Users\cqqqwq\Videos\bilibili\41301577497" --dec
 uv run video-learner convert "C:\Users\cqqqwq\Videos\bilibili\41301577497" --start 00:45:00 --end 00:55:00 --profile programming --asr-secret "C:\projects\video-learner\secrets\aliyun.secret" --secret "C:\projects\video-learner\secrets\deepseek.secret" --output "C:\projects\video-learner\output\my-notes"
 ```
 
-图文整理默认连接 DeepSeek `deepseek-v4-flash-vision-exp`，凭据用 `DEEPSEEK_API_KEY` 或 `--secret`。转换和文字修订也可用 `--provider qwen` 选择阿里云 `qwen3.8-flash`，默认开启思考和流式响应，凭据用 `DASHSCOPE_API_KEY` 或 `--secret`。Qwen ASR 使用同一阿里云环境变量或独立的 `--asr-secret`。不调用 OpenAI 服务，无需安装本地识别模型；指定同步字幕可跳过云端识别。完整示例见[使用指南](docs/usage.md)。
+图文整理默认连接 DeepSeek `deepseek-flash`，凭据用 `DEEPSEEK_API_KEY` 或 `--secret`。转换和文字修订也可用 `--provider qwen` 选择阿里云 `qwen3.8-flash`，默认开启思考和流式响应，凭据用 `DASHSCOPE_API_KEY` 或 `--secret`。Qwen ASR 使用同一阿里云环境变量或独立的 `--asr-secret`。不调用 OpenAI 服务，无需安装本地识别模型；指定同步字幕可跳过云端识别。完整示例见[使用指南](docs/usage.md)。
 
 真实视频位于仓库外；`output/`、`artifacts/`、`secrets/` 和模型均不提交。每个成功版本的 `notes.md` 和 `assets/` 可一起复制；继续修订须保留完整工作目录。

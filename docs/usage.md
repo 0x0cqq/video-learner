@@ -6,7 +6,7 @@
 
 ## 配置
 
-图文供应商通过 `--provider deepseek|qwen` 或 TOML 的 `provider` 选择。默认 DeepSeek，固定连接 `https://api.deepseek.com`，模型为 `deepseek-v4-flash-vision-exp`；Qwen 固定连接 `https://dashscope.aliyuncs.com/compatible-mode/v1`，模型为 `qwen3.8-flash`。不自动切换服务，`openai` 包仅作为这两家服务的兼容客户端。
+图文供应商通过 `--provider deepseek|qwen` 或 TOML 的 `provider` 选择。默认 DeepSeek，固定连接 `https://api.deepseek.com`，模型为 `deepseek-flash`；Qwen 固定连接 `https://dashscope.aliyuncs.com/compatible-mode/v1`，模型为 `qwen3.8-flash`。不自动切换服务，`openai` 包仅作为这两家服务的兼容客户端。
 
 DeepSeek 凭据从 `DEEPSEEK_API_KEY` 读取，Qwen 从 `DASHSCOPE_API_KEY` 读取；也可使用 `--secret` 指定所选供应商的密钥文件（仅包含密钥的 UTF-8 文本）。不要将真实密钥写入 TOML、命令行参数或文档。仓库忽略 `secrets/`。
 

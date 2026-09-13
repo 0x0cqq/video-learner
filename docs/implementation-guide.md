@@ -15,7 +15,7 @@
 | 项目代码 | 三条 CLI、媒体/证据/组织/修订/文件保护均有实现 | 依据下方验收矩阵维护 |
 | 媒体样本 | 两个真实缓存通过只读轨道与前中后解码抽查 | 不复制整课进入可提交文件 |
 | ASR | Qwen ASR 已完成真实片段及 10 分钟数学转换 | 术语质量和性能以真实记录为准 |
-| 多模态模型 | DeepSeek deepseek-v4-flash-vision-exp / Qwen qwen3.8-flash 已真实调用 | 显式选择供应商，不调用 OpenAI API |
+| 多模态模型 | 默认 DeepSeek deepseek-flash（V4.1 Flash）；Qwen qwen3.8-flash 可选 | 显式选择供应商，不调用 OpenAI API |
 | 数学样本 | 约 45 分钟线性代数，使用 10–20 分钟片段 | 检查系数、条件、板书中间状态 |
 
 这些记录对应本机锁定环境，不是所有平台的兼容性认证。本指南不保存 API Key。模型凭据缺失时，检查和精确换图仍能运行，转换明确报告配置错误。
@@ -229,3 +229,5 @@ M2–M4 的尾部采样、嵌套代码围栏与修订疑点关联已有离线回
 
 
 开发侧性能检查可运行 `uv run python tools/profile_conversion.py output/programming-full output/math-full --report-dir artifacts/profiling/my-run --local`，输出目录必须是新目录。它分析既有日志并离线回放本地阶段，不新增 P0 命令、不发模型请求；逐函数结果和计时限制见[性能分析](performance.md)。
+
+默认 DeepSeek 已对齐官方 V4.1 Flash API 名称 `deepseek-flash` 和 2026-09-14 价格快照；本次升级先执行离线适配与计费检查，真实短片段验证单独记录。
