@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from video_learner.common.config import Config, load_config, merge_provider_settings
+from video_learner.common.config import Config, load_config
 from video_learner.common.core import InputError, contained
 from video_learner.common.schemas import NoteBlock, Notebook, ReviewItem
 from video_learner.common.storage import (
@@ -30,14 +30,12 @@ from video_learner.notes.composition import (
 )
 from video_learner.notes.rendering import (
     AnchorConflict,
-    copy_dependencies,
     expected_spans,
     export_book,
     frame_of,
     image_dependencies,
     local_image,
     render_block,
-    stage_assets,
 )
 from video_learner.providers.base import Provider, create_provider
 from video_learner.workflows.conversion import (
@@ -53,7 +51,7 @@ def baseline_config(manifest: dict) -> Config:
     settings = manifest.get("config")
     if not isinstance(settings, dict):
         raise InputError("工作清单配置无效")
-    config = load_config(**settings)
+    config = load_config(base=settings)
     if extraction_hash(config) != manifest.get("extraction_hash"):
         raise InputError("提取配置指纹不一致，请恢复原工作清单")
     return config
@@ -178,24 +176,15 @@ def revise(
             if not image.is_file():
                 raise InputError("基线文档中的图片依赖缺失")
         original_config = baseline_config(manifest)
-        settings = original_config.model_dump()
-        if config_path:
-            import tomllib
-
-            try:
-                settings = merge_provider_settings(
-                    settings, tomllib.loads(config_path.read_text(encoding="utf-8"))
-                )
-            except (OSError, ValueError):
-                raise InputError("修订配置 TOML 无效") from None
-        settings = merge_provider_settings(settings, {"provider": model_provider, "model": model})
-        if instruction is not None:
-            settings["instruction"] = instruction
-        if secret is not None:
-            settings["secret_file"] = str(secret)
-        if allow_ai_additions is not None:
-            settings["allow_ai_additions"] = allow_ai_additions
-        config = load_config(**settings)
+        config = load_config(
+            config_path,
+            base=original_config.model_dump(),
+            provider=model_provider,
+            model=model,
+            instruction=instruction,
+            secret_file=str(secret) if secret is not None else None,
+            allow_ai_additions=allow_ai_additions,
+        )
         if extraction_hash(config) != extraction_hash(original_config):
             # 模型可换，提取设置不能换；当前修订必须继续使用基线对应的同一组证据。
             raise InputError("提取配置与基线不一致，请重新转换到独立目录")
@@ -251,7 +240,7 @@ def revise(
                         new_frame.id if identity == old_frame.id else identity
                         for identity in target_block.evidence_ids
                     ]
-                    # 保留当前手改图注，只替换受控图片和来源行；无法确定结构时报告冲突。
+                    # 保留当前手改图注，只替换受控图片行；无法确定结构时报告冲突。
                     target_current = current[span.start : span.end]
                     target_original = snapshot[
                         original_spans[target_id].start : original_spans[target_id].end
@@ -320,10 +309,7 @@ def revise(
                     )
                 new_current = current[: span.start] + replacement + current[span.end :]
                 validate_notebook(book, root)
-                expected_spans(new_current, book)
-                stage_assets(book, root, staging, baseline)
-                copy_dependencies(new_current, baseline, staging)
-                export_book(book, root, staging, new_current)
+                export_book(book, root, staging, new_current, base=baseline)
                 request_summary = instruction or f"指定帧 {at_us}"
                 atomic_bytes(
                     contained(staging, "changes.md"),

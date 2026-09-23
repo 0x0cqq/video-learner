@@ -217,11 +217,7 @@ class TerminalProgress:
         group = "compose" if self.stage == "revise" else self.stage
         if group in self.requests:
             metrics = self.requests[group].describe(self.planned.get(group))
-            self.progress.update(
-                self.task,
-                metrics=metrics,
-                pause_cuts=self.pause_cuts if group == "transcribe" else None,
-            )
+            self.progress.update(self.task, metrics=metrics)
 
     def stage_summary(self, stage: str, record: dict) -> str:
         """用已完成阶段的实际计数生成摘要；部分失败不显示成功标记。"""

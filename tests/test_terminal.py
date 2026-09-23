@@ -118,11 +118,12 @@ def test_strategy_and_chapter_summary_are_visible(verbose):
         }
     )
     display({"stage": "audio_boundary", "status": "selected", "reason": "pause"})
+    display({"stage": "transcribe", "status": "completed", "seconds": 1})
     text = output.getvalue()
     assert ("默认寻找末尾停顿切分" in text) == verbose
     assert ("章节目标 180 秒" in text) == verbose
     assert "已划分 34 章" in text
-    assert display.progress.tasks[0].fields["pause_cuts"] == 1
+    assert ("已采用停顿切点 1 处" in text) == verbose
 
 
 def test_stage_summaries_use_actual_counts_and_preserve_partial_status():

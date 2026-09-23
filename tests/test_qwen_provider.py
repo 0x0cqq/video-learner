@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 from test_provider import VALID, packet
 
-from video_learner.common.config import Config, load_config, merge_provider_settings
+from video_learner.common.config import Config, load_config
 from video_learner.common.core import TaskError
 from video_learner.common.storage import Events
 from video_learner.providers.base import create_provider
@@ -138,13 +138,13 @@ def test_qwen_disconnect_discards_partial_answer_and_repairs_schema(tmp_path, mo
 def test_provider_switch_resets_stale_model_and_credentials(tmp_path):
     """双向切换供应商时重置继承设置，同时保证本次明确指定的模型和密钥路径优先。"""
     settings = Config(secret_file="deepseek.secret").model_dump()
-    qwen = load_config(**merge_provider_settings(settings, {"provider": "qwen"}))
+    qwen = load_config(base=settings, provider="qwen")
     assert (qwen.model, qwen.api_key_env, qwen.secret_file) == (
         "qwen3.8-flash",
         "DASHSCOPE_API_KEY",
         None,
     )
-    deepseek = load_config(**merge_provider_settings(qwen.model_dump(), {"provider": "deepseek"}))
+    deepseek = load_config(base=qwen.model_dump(), provider="deepseek")
     assert (deepseek.model, deepseek.api_key_env) == (Config().model, "DEEPSEEK_API_KEY")
     path = tmp_path / "settings.toml"
     path.write_text(

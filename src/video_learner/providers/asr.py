@@ -203,7 +203,6 @@ class QwenASR:
             )
             if cancelled.wait(min(2**attempt, 4)):
                 raise TaskError("Qwen ASR 已取消")
-        raise TaskError("Qwen ASR 请求失败")
 
 
 def transcribe(

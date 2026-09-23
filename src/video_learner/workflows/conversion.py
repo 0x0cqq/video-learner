@@ -27,7 +27,7 @@ from video_learner.notes.composition import (
     plan_chapters,
     validate_notebook,
 )
-from video_learner.notes.rendering import export_book, render_notes
+from video_learner.notes.rendering import export_book
 from video_learner.providers.asr import transcribe, validate_asr_config
 from video_learner.providers.base import (
     PROMPT_VERSION,
@@ -121,16 +121,14 @@ def convert(
             config.asr_local_model,
         ):
             if dependency and Path(dependency).resolve().is_relative_to(target):
-                raise InputError("字幕或凭据文件位于输出目录内，不能强制删除")
+                raise InputError("字幕、凭据或本地模型位于输出目录内，不能强制删除")
     # 锁放在输出目录旁，既不提前创建输出，也能与后续 revise 使用同一把锁。
     lock_path = target.parent / f".{target.name}.lock"
     with directory_lock(lock_path):
         # 删除前重新解析并校验同一个绝对目标，防止等待锁期间路径被替换。
         if output_path(source_path, output, force=force) != target:
             raise InputError("输出路径在预检后发生变化，停止转换")
-        if target.exists():
-            if not force:
-                raise InputError("输出目录已存在；请指定新目录，或用 -f 删除后重跑")
+        if force and target.exists():
             shutil.rmtree(target)
         staging = target.parent / f".{target.name}.{uuid.uuid4().hex}.partial"
         staging.mkdir(parents=True, exist_ok=False)
@@ -159,7 +157,7 @@ def convert(
             start_us=start_us,
             end_us=end_us,
             source=source,
-            chapters=plan_chapters(start_us, end_us, config),
+            chapters=[],
             transcript=[],
             frames=[],
         )
@@ -175,7 +173,6 @@ def convert(
                         "subtitle": str(subtitle) if subtitle else None,
                     },
                 )
-                manifest["chapters"] = [c.model_dump() for c in book.chapters]
                 write_json(contained(staging, ".work/manifest.json"), manifest)
             with events.stage("transcribe"):
                 book.transcript = (
@@ -284,8 +281,7 @@ def convert(
             )
             with events.stage("validate_export"):
                 validate_notebook(book, staging)
-                export_book(book, staging, staging)
-                current = render_notes(book)
+                current = export_book(book, staging, staging)
                 atomic_bytes(contained(staging, ".work/versions/r001.generated.md"), current)
                 manifest["status"] = (
                     "completed"

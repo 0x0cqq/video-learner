@@ -11,7 +11,7 @@ from video_learner.common.schemas import Record
 
 
 class ModelPrice(Record):
-    """用户提供的单模型单价；空值表示尚未提供，不代表免费。"""
+    """随包或用户配置的单模型估算单价；空值表示未知，不代表免费。"""
 
     currency: str = Field(default="CNY", min_length=1, max_length=12)
     input_per_million: float | None = Field(default=None, ge=0, allow_inf_nan=False)
@@ -36,7 +36,7 @@ class ModelPrice(Record):
 
 
 def default_prices() -> dict[str, ModelPrice]:
-    """读取随包保存的公开价格快照；用户的 prices 表可整体替换它。"""
+    """读取随包保存的价格快照；用户的 prices 表可整体替换它。"""
     data = tomllib.loads(Path(__file__).with_name("prices.toml").read_text(encoding="utf-8"))
     return {key: ModelPrice.model_validate(value) for key, value in data["prices"].items()}
 
@@ -105,10 +105,15 @@ def merge_provider_settings(base: dict, updates: dict) -> dict:
     return result
 
 
-def load_config(path: Path | None = None, **overrides) -> Config:
-    """按覆盖参数 > TOML > 默认值加载并校验配置，错误提示仅包含字段位置。"""
+def load_config(path: Path | None = None, *, base: dict | None = None, **overrides) -> Config:
+    """按覆盖参数 > TOML > 基线 > 默认值加载配置，保留基线中有意义的空值。
+
+    CLI 未提供的参数为 None，只忽略这些覆盖项；错误提示仅包含字段位置。
+    """
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8")) if path else {}
+        data = dict(base) if base is not None else {}
+        if path:
+            data = merge_provider_settings(data, tomllib.loads(path.read_text(encoding="utf-8")))
         data = merge_provider_settings(data, overrides)
         return Config.model_validate(data)
     except (OSError, ValueError) as exc:

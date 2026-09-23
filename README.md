@@ -28,13 +28,13 @@ P0 的 `inspect`、`convert`、`revise` 已实现。转换保存来源证据、�
 
 ## 安装与使用
 
-在项目目录使用 PowerShell：
+在项目目录使用 PowerShell。示例视频位于项目外的 `D:\media\lesson.mp4`；转换前按[使用指南](docs/usage.md#配置)准备两份凭据文件：
 
 ```powershell
 uv sync --locked
 uv run video-learner --help
-uv run video-learner inspect ".\sample.mp4" --decode
-uv run video-learner convert ".\sample.mp4" --output ".\output\my-notes"
+uv run video-learner inspect "D:\media\lesson.mp4" --decode
+uv run video-learner convert "D:\media\lesson.mp4" --asr-secret ".\secrets\aliyun.secret" --secret ".\secrets\deepseek.secret" --output ".\output\my-notes"
 ```
 
 图文整理默认连接 DeepSeek `deepseek-flash`，凭据用 `DEEPSEEK_API_KEY` 或 `--secret`。转换和文字修订也可用 `--provider qwen` 选择阿里云 `qwen3.8-flash`，默认开启思考和流式响应，凭据用 `DASHSCOPE_API_KEY` 或 `--secret`。Qwen ASR 使用同一阿里云环境变量或独立的 `--asr-secret`。不调用 OpenAI 服务；云端路径无需本地权重，可选本地识别的安装见[使用指南](docs/usage.md#本地语音识别)。指定同步字幕可跳过云端识别。完整示例见[使用指南](docs/usage.md)。

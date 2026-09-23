@@ -117,11 +117,9 @@ def composition_input(
     chapter: Chapter,
     config: Config,
     root: Path,
-    current_markdown: str | None = None,
-    target_ids: list[str] | None = None,
 ) -> tuple[CompositionInput, list[tuple[str, Path]]]:
-    """冻结本次章节任务的证据包和图片身份，供调用及离线重放共用。"""
-    packet, images = evidence_packet(book, chapter, config, root, current_markdown, target_ids)
+    """冻结转换章节的证据包和图片身份，供调用及离线重放共用。"""
+    packet, images = evidence_packet(book, chapter, config, root)
     return freeze_composition_input(packet, images, root), images
 
 
@@ -129,7 +127,7 @@ def freeze_composition_input(
     packet: dict, images: list[tuple[str, Path]], root: Path
 ) -> CompositionInput:
     """记录实际送入模型的证据和图片内容，不保存重复的图片字节。"""
-    snapshot = CompositionInput(
+    return CompositionInput(
         packet=packet,
         images=[
             CompositionImage(
@@ -140,7 +138,6 @@ def freeze_composition_input(
             for identity, path in images
         ],
     )
-    return snapshot
 
 
 def validate_draft(draft: Draft, packet: dict) -> None:

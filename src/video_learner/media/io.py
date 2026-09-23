@@ -206,7 +206,6 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
             for track in tracks:
                 with open_media(source_file(path, track)) as (container, _):
                     stream = container.streams[track.index]
-                    count = 0
                     if full:
                         last_end = None
                         for frame in container.decode(stream):
@@ -221,7 +220,6 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
                                 else 0
                             )
                             last_end = at + frame_duration
-                            count += 1
                         if (
                             last_end is None
                             or last_end < track.start_us + track.duration_us - US // 4
@@ -237,9 +235,6 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
                             frame = next(container.decode(stream), None)
                             if frame is None or frame.is_corrupt:
                                 raise TaskError("抽查解码无有效帧")
-                            count += 1
-                    if not count:
-                        raise TaskError("未解码出帧")
             source.sampled_decode = True
             source.full_verified = full and not source.diagnostics
         except (av.FFmpegError, TaskError, OSError) as exc:

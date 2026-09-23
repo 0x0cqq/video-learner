@@ -9,7 +9,7 @@ from pathlib import Path
 import psutil
 
 from video_learner.common.config import Config
-from video_learner.common.core import US, parse_time, time_range
+from video_learner.common.core import US, output_path, parse_time, time_range
 from video_learner.common.storage import Events, write_json
 from video_learner.media.evidence import save_transcript
 from video_learner.media.io import inspect_source
@@ -34,13 +34,10 @@ def main() -> None:
     if not 5 <= args.seconds <= 180:
         parser.error("profiling 片段须为 5–180 秒")
     source = args.source.resolve()
-    output = args.output.resolve()
-    if output.is_relative_to(source if source.is_dir() else source.parent):
-        parser.error("profiling 输出必须位于源目录外")
+    output = output_path(source, args.output)
     info = inspect_source(source)
-    begin, end = time_range(
-        parse_time(args.start), parse_time(args.start) + args.seconds * US, info.duration_us
-    )
+    start_us = parse_time(args.start)
+    begin, end = time_range(start_us, start_us + args.seconds * US, info.duration_us)
     config = Config(
         asr_backend="local",
         asr_device=args.device,

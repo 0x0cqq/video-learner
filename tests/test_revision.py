@@ -13,6 +13,36 @@ from video_learner.workflows.replay import replay_revision
 from video_learner.workflows.revision import revise
 
 
+def test_revision_preserves_nullable_baseline_settings(video, tmp_path, monkeypatch):
+    """自动语言的空值须保留；覆盖图文供应商和指令后仍能复用基线提取指纹。"""
+    from video_learner.common.config import Config
+    from video_learner.workflows.conversion import convert
+
+    subtitle = video.with_suffix(".srt")
+    subtitle.write_text("1\n00:00:00,000 --> 00:00:04,000\n测试\n", encoding="utf-8")
+    root = convert(
+        video,
+        tmp_path / "nullable",
+        Config(asr_language=None),
+        subtitle=subtitle,
+        provider=DeterministicProvider(),
+    )
+    config_path = tmp_path / "revision.toml"
+    config_path.write_text('provider = "qwen"\ninstruction = "配置中的要求"\n', encoding="utf-8")
+
+    def factory(config, events):
+        """核对真正用于修订的配置，避免仅单测合并字典而遗漏加载基线时的空值丢失。"""
+        assert config.asr_language is None
+        assert config.provider == "qwen" and config.model == "qwen3.8-flash"
+        assert config.instruction == "命令行要求"
+        return DeterministicProvider()
+
+    monkeypatch.setattr("video_learner.workflows.revision.create_provider", factory)
+    destination = revise(root, section="ch-001", instruction="命令行要求", config_path=config_path)
+    assert (destination / "notes.md").is_file()
+    assert replay_revision(root, "r002").chapters[0].status == "completed"
+
+
 def test_display_title_improvement_keeps_existing_evidence_revisable(converted, monkeypatch):
     """实际文件指纹不变时，标题展示改进不能把既有讲义误判成另一份素材。"""
     from video_learner.media.io import inspect_source

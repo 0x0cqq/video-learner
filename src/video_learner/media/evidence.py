@@ -14,13 +14,13 @@ from video_learner.media.io import extract_frame, open_media, source_file, track
 
 
 def audio_window(path: Path, source: Source, start_us: int, end_us: int) -> np.ndarray:
-    """提取原视频 [start_us, end_us) 的 16 kHz 单声道 float32 波形，最多 310 秒。
+    """提取原视频 [start_us, end_us) 的 16 kHz 单声道 float32 波形，最多 60 秒。
 
     按重采样帧 PTS 放回窗口位置，轨道起点差、时间空洞及片段边缘以静音保留，
     不把解码到的音频简单拼接后误当连续时间。
     """
-    if not 0 <= start_us < end_us <= source.duration_us or end_us - start_us > 310 * US:
-        raise InputError("音频窗口越界或超过 310 秒内存上限")
+    if not 0 <= start_us < end_us <= source.duration_us or end_us - start_us > 60 * US:
+        raise InputError("音频窗口越界或超过 60 秒上限")
     rate = 16000
     result = np.zeros(((end_us - start_us) * rate // US,), dtype=np.float32)
     track = track_of(source, "audio")

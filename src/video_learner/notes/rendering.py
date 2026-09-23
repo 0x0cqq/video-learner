@@ -26,12 +26,9 @@ class AnchorConflict(InputError):
 
 @dataclass(frozen=True)
 class Span:
-    identity: str
     kind: str
     start: int
     end: int
-    body_start: int
-    body_end: int
     parent: str | None
 
 
@@ -73,14 +70,12 @@ def locate(data: bytes) -> dict[str, Span]:
                     raise AnchorConflict(f"锚点嵌套结构冲突：{identity}")
                 seen.add(identity)
                 parent = stack[-1][1] if stack else None
-                stack.append((kind, identity, offset, offset + len(line), parent))
+                stack.append((kind, identity, offset, parent))
             else:
                 if not stack or stack[-1][:2] != (kind, identity):
                     raise AnchorConflict(f"锚点未正确闭合：{identity}")
-                _, _, start, body_start, parent = stack.pop()
-                spans[identity] = Span(
-                    identity, kind, start, offset + len(line), body_start, offset, parent
-                )
+                _, _, start, parent = stack.pop()
+                spans[identity] = Span(kind, start, offset + len(line), parent)
         elif b"<!-- vl:" in stripped:
             raise AnchorConflict("受控锚点格式已被修改；请恢复原锚点后重试")
         offset += len(line)
@@ -409,18 +404,24 @@ def stage_assets(
 
 
 def export_book(
-    book: Notebook, evidence_root: Path, destination: Path, markdown: bytes | None = None
-) -> None:
-    """校验锚点及图片依赖后，将文稿、索引、来源和疑点写入目标目录。
+    book: Notebook,
+    evidence_root: Path,
+    destination: Path,
+    markdown: bytes | None = None,
+    *,
+    base: Path | None = None,
+) -> bytes:
+    """校验锚点及图片依赖后导出文稿、索引、来源和疑点，返回实际写入的文稿字节。
 
-    markdown 可传入保留手改的字节；这里只逐文件原子写入，整版发布和加锁由上层负责。
+    markdown 保留手改字节，base 提供基线图片和手加依赖；整版发布和加锁由上层负责。
     """
     data = render_notes(book) if markdown is None else markdown
     expected_spans(data, book)
-    stage_assets(book, evidence_root, destination)
-    copy_dependencies(data, destination, destination)
+    stage_assets(book, evidence_root, destination, base)
+    copy_dependencies(data, base if base is not None else destination, destination)
     atomic_bytes(contained(destination, "notes.md"), data)
     atomic_bytes(contained(destination, "review.md"), render_review(book))
     atomic_bytes(contained(destination, "sources.md"), render_sources(book))
     write_json(contained(destination, "notes.json"), book.model_dump())
     write_json(contained(destination, "source.json"), book.source.model_dump())
+    return data

@@ -4,7 +4,7 @@
 
 用户已授权按照实现指南实现第一阶段 P0。可在该范围内创建业务代码、测试、包配置与锁文件、安装依赖、运行模型及转换验证。实现后同步更新 README 的状态和指南中的里程碑记录，区分代码完成与实际验收结果。
 
-实现过程、实验与 ADR 记录到 `docs/implementation-notes.md`；技术和用户文档仅维护当前最终状态，不记录尝试和回滚。图文整理支持用户指定的 DeepSeek `deepseek-flash` 和阿里云 Qwen `qwen3.8-flash`；语音识别默认通过阿里云 DashScope 调用 `qwen3-asr-flash`，可显式选择本地 CPU/CUDA faster-whisper。Qwen 图文默认启用思考和流式响应，只将最终正文交给结构校验与渲染。不得调用 OpenAI API，`openai` SDK 仅作为以上两家服务的兼容客户端。独立凭据文件为被忽略的 `secrets/deepseek.secret` 和 `secrets/aliyun.secret`，不得显示、记录或提交密钥值。Qwen ASR 返回的全文仅按真实音频切片区间引用，不捏造句级时间戳。
+实现过程、实验方案与 ADR 记录到 `docs/implementation-notes.md`；已执行的验证和内容审阅分别记录在 `docs/validation.md`、`docs/content-quality.md`。技术和用户文档仅维护当前最终状态。图文整理支持用户指定的 DeepSeek `deepseek-flash` 和阿里云 Qwen `qwen3.8-flash`；语音识别默认通过阿里云 DashScope 调用 `qwen3-asr-flash`，可显式选择本地 CPU/CUDA faster-whisper。Qwen 图文默认启用思考和流式响应，只将最终正文交给结构校验与渲染。不得调用 OpenAI API，`openai` SDK 仅作为以上两家服务的兼容客户端。独立凭据文件为被忽略的 `secrets/deepseek.secret` 和 `secrets/aliyun.secret`，不得显示、记录或提交密钥值。Qwen ASR 返回的全文仅按真实音频切片区间引用，不捏造句级时间戳。
 
 ## 阅读顺序与范围
 
@@ -27,12 +27,12 @@
 - 正式输出缺少必要指标时，在现有事件日志和 CLI 显示中补齐；不因此新增 P1 的 `status`、`resume` 或独立监控服务。
 - 仅在进程会话丢失、异常定位或事后性能分析时按需读取持久化日志。可复用的分析工具放在 `tools/`，不将一次性 `.tmp` 脚本作为日常进度入口。
 
-## 工程约定（开始实现后适用）
+## 工程约定
 
 - Python 3.12，uv 管理环境和锁定依赖；目标平台先验证 Windows。默认 shell 为 PowerShell。
 - CLI 保持轻薄：参数转换、错误提示和显示交给 Typer/Rich；业务流程放到应用层。
 - PyAV 处理媒体，阿里云 Qwen ASR 处理转写，Pillow/NumPy 处理图片，Pydantic 校验结构，P0 以 JSON 清单和本地文件保存状态。
-- 多模态供应商通过窄接口隔离，先接一个实际可用的供应商。不要提前建设插件框架或通用 Agent 引擎。
+- DeepSeek 与 Qwen 图文供应商通过窄接口隔离。不要提前建设插件框架或通用 Agent 引擎。
 - 语音识别以 Qwen 云端为默认，可选本地 CPU/CUDA；共用切片、并发和证据流程，不做自动回退或独立推理服务。PyAV 在本机解码，来源精度按实际音频切片明确标注。
 - 使用 `pathlib` 与显式编码；文档、CLI 提示默认中文，代码标识符使用英文。使用类型标注，不为简单函数建立多余抽象。
 - 对有实际职责且非一目了然的函数添加中文文档字符串，说明用途、关键约束及必要的副作用或失败语义；复杂分支用行内注释解释原因。测试夹具和故障模拟同样说明设计意图，简单转发和显然的操作不堆砌注释。修改逻辑时同步维护说明。

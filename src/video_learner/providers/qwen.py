@@ -50,12 +50,13 @@ class QwenProvider(DeepSeekProvider):
         if self.config.qwen_enable_thinking:
             options["thinking_budget"] = self.config.qwen_thinking_budget
         started = time.monotonic()
+        schema = strict_schema()
         stream = self.client.chat.completions.create(
             model=self.config.model,
             messages=[
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT + "\nJSON schema:\n" + json.dumps(strict_schema()),
+                    "content": SYSTEM_PROMPT + "\nJSON schema:\n" + json.dumps(schema),
                 },
                 {"role": "user", "content": parts},
             ],
@@ -65,7 +66,7 @@ class QwenProvider(DeepSeekProvider):
             max_completion_tokens=self.config.max_output_tokens,
             response_format={
                 "type": "json_schema",
-                "json_schema": {"name": "chapter", "schema": strict_schema(), "strict": True},
+                "json_schema": {"name": "chapter", "schema": schema, "strict": True},
             },
         )
         stream_open_seconds = time.monotonic() - started
@@ -73,7 +74,6 @@ class QwenProvider(DeepSeekProvider):
         first_chunk = first_reasoning = first_answer = None
         chunks = reasoning_characters = 0
         exhausted = False
-        phases = set()
         try:
             for chunk in stream:
                 elapsed = time.monotonic() - started
@@ -89,24 +89,21 @@ class QwenProvider(DeepSeekProvider):
                     continue
                 choice = chunk.choices[0]
                 delta = choice.delta
-                if getattr(delta, "reasoning_content", None):
-                    reasoning_characters += len(delta.reasoning_content)
+                reasoning = getattr(delta, "reasoning_content", None)
+                answer_text = getattr(delta, "content", None)
+                if reasoning:
+                    reasoning_characters += len(reasoning)
                     if first_reasoning is None:
                         first_reasoning = elapsed
-                if getattr(delta, "content", None) and first_answer is None:
-                    first_answer = elapsed
-                for phase, value in (
-                    ("thinking", getattr(delta, "reasoning_content", None)),
-                    ("answering", getattr(delta, "content", None)),
-                ):
-                    if value and phase not in phases:
-                        self.events.emit("model_stream", phase, call=self.calls)
-                        phases.add(phase)
-                if getattr(delta, "content", None):
-                    size += len(delta.content)
+                        self.events.emit("model_stream", "thinking", call=self.calls)
+                if answer_text:
+                    if first_answer is None:
+                        first_answer = elapsed
+                        self.events.emit("model_stream", "answering", call=self.calls)
+                    size += len(answer_text)
                     if size > 100000:
                         raise TaskError("Qwen 正文超过大小上限")
-                    answer.append(delta.content)
+                    answer.append(answer_text)
                 if choice.finish_reason is not None:
                     finish = choice.finish_reason
             exhausted = True

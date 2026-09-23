@@ -184,10 +184,9 @@ def render_report(reports: dict) -> str:
         lines.append(f"| {name} | " + " | ".join(f"{value:.1f}s" for value in values) + " |")
     for name, report in reports.items():
         lines += ["", f"## {name}", ""]
-        total = report["stage_seconds_total"]
         model, asr = report["model_requests"], report["asr_requests"]
         remote = model.get("sum_seconds", 0) + asr.get("sum_seconds", 0)
-        lines.append(f"云端请求合计 {remote:.1f}s，占已计时阶段 {remote / total:.1%}。")
+        lines.append(f"已计时云端请求累计 {remote:.1f}s；并发请求可重叠，不作为墙钟耗时占比。")
         lines.append(
             f"图文失败请求 {report['failed_model_requests']} 次，已记录耗时 "
             f"{report['failed_model_seconds_measured']:.1f}s；"

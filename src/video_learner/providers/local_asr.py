@@ -94,6 +94,8 @@ class LocalASR:
                     raise TaskError("本地 ASR 已取消")
                 parts.append(segment.text)
             text = "".join(parts).strip()
+        except TaskError:
+            raise
         except (OSError, RuntimeError, ValueError) as exc:
             raise TaskError(
                 f"本地 ASR 推理失败（{type(exc).__name__}），请检查模型及运行库"

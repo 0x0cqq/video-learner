@@ -101,9 +101,9 @@ def credential(config: Config) -> str:
 def strict_schema() -> dict:
     """从 Draft 派生严格响应 schema，并按文字、图片块分别约束 frame_id。
 
-    在副本上移除默认值、要求完整字段并禁止额外字段，避免污染本地 Pydantic 模型。
+    必填字段与额外字段限制由 Draft 定义，只补充块类型对应的跨字段约束。
     """
-    schema = copy.deepcopy(Draft.model_json_schema())
+    schema = Draft.model_json_schema()
     block_schema = schema["$defs"]["DraftBlock"]
     alternatives = []
     for kind in ("text", "figure"):
@@ -117,20 +117,6 @@ def strict_schema() -> dict:
         alternatives.append(alternative)
     schema["$defs"]["DraftBlock"] = {"anyOf": alternatives}
 
-    def visit(value):
-        """递归规范嵌套对象与引用定义，使严格输出规则同样覆盖列表中的块结构。"""
-        if isinstance(value, dict):
-            value.pop("default", None)
-            if "properties" in value:
-                value["required"] = list(value["properties"])
-                value["additionalProperties"] = False
-            for child in value.values():
-                visit(child)
-        elif isinstance(value, list):
-            for child in value:
-                visit(child)
-
-    visit(schema)
     return schema
 
 
@@ -155,6 +141,7 @@ class DeepSeekProvider:
 
     def _request(self, content: list[dict], repair: str | None):
         """将共用证据内容映射到 DeepSeek Responses 请求；repair 为本轮校验修复提示。"""
+        schema = strict_schema()
         self._last_input = self._request_prefix + [
             {
                 "role": "user",
@@ -163,13 +150,13 @@ class DeepSeekProvider:
         ]
         return self.client.responses.create(
             model=self.config.model,
-            instructions=SYSTEM_PROMPT + "\nJSON schema:\n" + json.dumps(strict_schema()),
+            instructions=SYSTEM_PROMPT + "\nJSON schema:\n" + json.dumps(schema),
             input=self._last_input,
             text={
                 "format": {
                     "type": "json_schema",
                     "name": "chapter",
-                    "schema": strict_schema(),
+                    "schema": schema,
                 }
             },
             reasoning={"effort": self.config.reasoning_effort},
@@ -406,7 +393,6 @@ class DeepSeekProvider:
                 "model_call", "retrying", attempt=attempt + 1, max_retries=self.config.max_retries
             )
             time.sleep(min(2**attempt, 4))
-        raise TaskError("模型请求失败")
 
 
 def create_provider(config: Config, events: Events) -> Provider:

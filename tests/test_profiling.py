@@ -22,6 +22,7 @@ def test_stage_summary_does_not_double_count_or_mix_revisions():
         {"stage": "transcribe", "status": "completed", "seconds": 10},
         {"stage": "plan_chapters", "status": "completed", "seconds": 1},
         {"stage": "asr_model_usage", "status": "received", "seconds": 8},
+        {"stage": "asr_model_usage", "status": "received", "seconds": 8},
         {"stage": "audio_decode:audio-1", "status": "completed", "seconds": 2},
         {"stage": "model_usage", "status": "received", "call": 1, "seconds": 3},
         {"stage": "model_call", "status": "failed", "call": 1, "seconds": 3.2},
@@ -37,6 +38,9 @@ def test_stage_summary_does_not_double_count_or_mix_revisions():
     assert result["failed_model_seconds_measured"] == 5
     assert result["failed_model_requests_without_duration"] == 0
     assert result["audio_prepare_seconds"] == 2
+    report = module.render_report({"concurrent": result, "empty": module.summarize_events([])})
+    assert "累计 26.0s" in report and "并发请求可重叠" in report
+    assert "%" not in report
 
 
 def test_stream_timing_separates_first_chunks_and_excludes_thinking_text(tmp_path, monkeypatch):

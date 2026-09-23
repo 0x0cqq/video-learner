@@ -68,3 +68,19 @@ def test_local_conversion_reuses_windows_without_cloud_key(video, tmp_path, monk
     assert closed == [True]
     assert extraction_hash(config) != extraction_hash(Config())
     assert extraction_hash(config) == extraction_hash(config.model_copy(update={"jobs": 1}))
+
+
+def test_local_cancellation_during_iteration_keeps_its_diagnostic(tmp_path):
+    """模型迭代期间收到取消，保留取消原因，避免被 RuntimeError 捕获误报为运行库故障。"""
+    stop = Event()
+
+    def segments():
+        """第一段正常产出后模拟队列取消，再次交付时应立即停止消费。"""
+        yield SimpleNamespace(text="第一段")
+        stop.set()
+        yield SimpleNamespace(text="取消后的内容")
+
+    model = SimpleNamespace(transcribe=lambda *args, **kwargs: (segments(), None))
+    service = LocalASR(Config(asr_backend="local"), Events(tmp_path), model=model)
+    with pytest.raises(TaskError, match="^本地 ASR 已取消$"):
+        service.recognize(b"wav", stop)
