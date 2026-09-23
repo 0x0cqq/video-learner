@@ -429,6 +429,8 @@ Windows CUDA 预检最初用 ctypes 默认 DLL 搜索方式，未使用用户配
 | 可核对性 | 页面有视频链接和章节时间；来源说明概述 ASR 术语校正，但页面没有逐段转写、逐块证据或单独的疑点清单 | `sources.md` 逐块关联真实音频窗口和帧，保留原转写及工作记录；窗口时间不是句级时间，结构合法也不能证明每句结论受证据支持 |
 | 内容正确性 | 两处求逆把分母说成对任意有理系数均非零，漏掉零元素；未限制次数就说不可约多项式的根一定无理 | 未经校订的初稿也有相同遗漏。独立人工校订稿补上非零前提、记录一次多项式例外；该校订不代表当前自动生成已稳定解决这些问题 |
 
+源码核对补充：参考项目 2026-09-21 的公开版本（`6ec2135`）中，`create_run` 默认 `transcript_mode="asr-only"`、`ocr_mode="off"`；流水线据此以 `audio_only=True` 调用下载，`yt-dlp` 选择 `bestaudio`，随后提取音频、ASR 并写出 `transcript.md`。报告 Agent 的指令要求读取 `transcript.md` 与 `input.json`，并未把原视频帧交给模型；报告后的 `report.png` 是 HTML 页面长图。可选 `fused` 模式会下载含画面的媒体，并在启用 OCR 时从画面字幕区域提取文字参与转写融合，仍未见将完整板书截图作为报告模型输入的路径。公开仓库未包含网站服务代码或本次任务的 `input.json`，因此只能确认公开默认路径、不能直接证明线上部署版本和本次任务的保存参数；本次按网页默认项提交、报告无视频截图，与仅用音轨的路径一致。这是同课比较的重要实验条件：双方输入模态不同，网站报告无板书图不能单凭报告页面归因于选图策略。源码：<https://github.com/imexlovery/video-report-agent/blob/6ec213590a8144f0409e393f02c32c29db43cd43/src/video_report_agent/pipeline.py>、<https://github.com/imexlovery/video-report-agent/blob/6ec213590a8144f0409e393f02c32c29db43cd43/src/video_report_agent/ingest.py>、<https://github.com/imexlovery/video-report-agent/blob/6ec213590a8144f0409e393f02c32c29db43cd43/src/video_report_agent/pi.py>。
+
 三处数学断言在原课口述/本地转写中也存在未限定说法，因此应区分原课省略与整理者写成确定结论。反例分别取 $x=y=0$、$Z=W=0$ 和一次不可约多项式 $f(t)=t-1$。本地校订稿另指出第一步同乘 $y-z\alpha$ 也需要非零分支。网站报告和本地初稿都未通过公式的文字流畅度自动发现这些前提；报告页的“逐段核对”说明无法代替可点开的原始依据。另一个历史叙述“五次方程没有根式解”宜写明“一般五次方程”，避免误解为每个五次方程都不可解。
 
 按现有职责划分的后续实验方向：
