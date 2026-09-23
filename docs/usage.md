@@ -36,7 +36,7 @@ uv run video-learner convert "C:\Users\cqqqwq\Videos\bilibili\41301577497" --sta
 
 默认使用阿里云 Qwen ASR，按原视频时间提取 16 kHz 单声道音频；也可用 `--asr-backend local --asr-device cpu|cuda` 选择本地识别，见下方安装配置。
 
-生成的根目录对应 r001：`notes.md`、`assets/`、`sources.md`、`review.md`、`source.json`、`transcript.jsonl`、`notes.json`。正文保留连贯解释与必要图片，图注可省略；来源区间、证据和修订 ID 集中在 `sources.md`。`.work/` 保存本机来源、指纹、原帧、音频窗口、生成快照、版本清单与日志。
+生成的根目录对应 r001：`notes.md`、`assets/`、`sources.md`、`review.md`、`source.json`、`transcript.jsonl`、`notes.json`。正文保留连贯解释与必要图片，图注可省略；来源区间、证据、修订 ID 和手改同步状态集中在 `sources.md`，具体内容疑点列在 `review.md`。`.work/` 保存本机来源、指纹、原帧、音频窗口、生成快照、版本清单与日志。
 
 ## 云端语音识别
 
@@ -100,7 +100,7 @@ uv run video-learner revise "C:\projects\video-learner\output\sample" --base r00
 
 目标的当前手改内容作为输入；非目标 Markdown 字节保留。章节修订保留标题，以避免改写范围外的目录。锚点缺失、重复、嵌套冲突或请求期间再次编辑会停止发布，诊断与建议片段在 `.work/conflicts/`。
 
-可以手改 `notes.md`，不要改写 `notes.json` 和 `.work/`。手工增加的图片应保存在当前版本目录内，不能引用越界路径、外部 URL 或缺失文件。保留的手改块会标记结构化正文未核验同步。
+可以手改 `notes.md`，不要改写 `notes.json` 和 `.work/`。手工增加的图片应保存在当前版本目录内，不能引用越界路径、外部 URL 或缺失文件。保留的手改块会在 `sources.md` 标记结构化正文未核验同步，`review.md` 只显示一条状态提示。
 
 ## 精确换图
 

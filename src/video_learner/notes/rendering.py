@@ -154,9 +154,22 @@ def normalize_headings(body: str) -> str:
 
 
 def inline_text(value: str) -> str:
-    """压平换行并转义行内 Markdown 控制字符，用于标题和疑点等非正文文本。"""
+    """压平换行并转义行内控制字符，保留 $...$ 中的 LaTeX 命令。"""
     value = " ".join(value.splitlines())
-    return re.sub(r"([\\`*{}_\[\]<>])", r"\\\1", value)
+    parts = []
+    start = 0
+    for math in re.finditer(r"(?<!\\)\$(?:\\.|[^\\$\n])+\$", value):
+        parts.append(re.sub(r"([\\`*{}_\[\]<>])", r"\\\1", value[start : math.start()]))
+        children = [
+            child for token in MARKDOWN.parseInline(math.group()) for child in token.children or []
+        ]
+        if any(child.type != "text" for child in children):
+            parts.append(re.sub(r"([\\`*{}_\[\]<>])", r"\\\1", math.group()))
+        else:
+            parts.append(math.group().replace("<", r"\<").replace(">", r"\>"))
+        start = math.end()
+    parts.append(re.sub(r"([\\`*{}_\[\]<>])", r"\\\1", value[start:]))
+    return "".join(parts)
 
 
 def evidence_range(book: Notebook, identity: str) -> tuple[int, int]:
@@ -234,8 +247,13 @@ def render_review(book: Notebook) -> bytes:
         "证据 ID 和时间通过机械检查不代表内容正确。请核对公式、代码与关键步骤。",
         "",
     ]
-    if book.sync_status == "manual_unverified":
-        lines.extend(["当前文稿含保留的手改；结构化索引尚未核验同步，以 notes.md 为准。", ""])
+    manual = any(
+        block.sync_status == "manual_unverified"
+        for chapter in book.chapters
+        for block in chapter.blocks
+    )
+    if book.sync_status == "manual_unverified" or manual:
+        lines.extend(["当前文稿含保留的手改；结构化索引尚未核验同步，具体块见 sources.md。", ""])
     for chapter in book.chapters:
         if chapter.status != "completed":
             lines.append(
@@ -246,10 +264,6 @@ def render_review(book: Notebook) -> bytes:
             f"- {timestamp(item.start_us)}–{timestamp(item.end_us)}：{inline_text(item.reason)}"
             + (f"（{item.block_id}）" if item.block_id else "")
         )
-    for chapter in book.chapters:
-        for block in chapter.blocks:
-            if block.sync_status == "manual_unverified":
-                lines.append(f"- {block.id}：保留了用户手改，结构化正文与当前文稿未核验同步。")
     return ("\n".join(lines) + "\n").encode()
 
 
@@ -292,6 +306,19 @@ def render_sources(book: Notebook) -> bytes:
                 + ", ".join(block.evidence_ids)
                 + " |"
             )
+        lines.append("")
+    manual = [
+        (
+            chapter.id,
+            [block.id for block in chapter.blocks if block.sync_status == "manual_unverified"],
+        )
+        for chapter in book.chapters
+    ]
+    if book.sync_status == "manual_unverified" or any(ids for _, ids in manual):
+        lines.extend(["## 结构化索引同步状态", "", "当前文稿含保留的手改，以 notes.md 为准。", ""])
+        for chapter_id, ids in manual:
+            if ids:
+                lines.append(f"- {chapter_id}：" + "、".join(ids))
         lines.append("")
     return ("\n".join(lines) + "\n").encode()
 

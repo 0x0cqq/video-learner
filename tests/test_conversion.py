@@ -6,7 +6,16 @@ import pytest
 from video_learner.common.config import Config
 from video_learner.common.core import InputError, TaskError
 from video_learner.common.schemas import Draft, DraftBlock, Notebook
-from video_learner.notes.rendering import AnchorConflict, expected_spans, image_dependencies, locate
+from video_learner.notes.rendering import (
+    MARKDOWN,
+    AnchorConflict,
+    expected_spans,
+    image_dependencies,
+    locate,
+    render_notes,
+    render_review,
+    render_sources,
+)
 from video_learner.workflows.conversion import convert
 
 
@@ -83,6 +92,28 @@ def test_offline_conversion_exports_references_and_versions(converted):
     assert "**原课整理" not in data.decode()
     sources = (root / "sources.md").read_text(encoding="utf-8")
     assert "blk-001-001" in sources and "tr-000001" in sources
+
+
+def test_math_titles_and_manual_status_keep_reading_and_index_separate(converted):
+    """标题公式保留 LaTeX；手改块集中列入来源索引，不淹没内容核对清单。"""
+    root, _ = converted
+    book = Notebook.model_validate_json((root / "notes.json").read_text(encoding="utf-8"))
+    book.chapters[0].title = r"$\mathbb{Q}(\sqrt[3]{2})$ 与 [定义]"
+    book.chapters[0].blocks[0].sync_status = "manual_unverified"
+    book.sync_status = "manual_unverified"
+
+    notes = render_notes(book).decode()
+    sources = render_sources(book).decode()
+    review = render_review(book).decode()
+    title = r"$\mathbb{Q}(\sqrt[3]{2})$ 与 \[定义\]"
+    assert f"## {title}" in notes and f"## {title} · ch-001" in sources
+    assert f"[{title}](#ch-001)" in notes
+    assert 'href="#ch-001"' in MARKDOWN.render(notes)
+    assert "- ch-001：blk-001-001" in sources
+    assert review.count("结构化索引尚未核验同步") == 1
+    assert "- blk-001-001：保留了用户手改" not in review
+    book.chapters[0].title = "$[外链](https://example.com)$"
+    assert 'href="https://example.com"' not in MARKDOWN.render(render_notes(book).decode())
 
 
 def test_editorial_export_preserves_baseline_and_rejects_changed_evidence(converted, tmp_path):

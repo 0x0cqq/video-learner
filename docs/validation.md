@@ -1,11 +1,12 @@
 # P0 验证记录
 
-最后更新：2026-09-14。环境：Windows、Python 3.12.14、uv 锁定依赖；当前 ASR 默认阿里云 Qwen，可选本地 CPU/CUDA，当前默认 DeepSeek `deepseek-flash`（V4.1 Flash），历史调用另包括旧 DeepSeek 名称和 Qwen `qwen3.8-flash`。
+最后更新：2026-09-24。环境：Windows、Python 3.12.14、uv 锁定依赖；当前 ASR 默认阿里云 Qwen，可选本地 CPU/CUDA，当前默认 DeepSeek `deepseek-flash`（V4.1 Flash），历史调用另包括旧 DeepSeek 名称和 Qwen `qwen3.8-flash`。
 
 三条 P0 命令及文件保护已经实现。下列记录区分当前程序行为、历史真实运行和内容抽查；旧数据版本的真实产物不作为当前修订基线；尚无用户人工修订耗时对照，不能据此声称整体质量验收通过。
 
 ## 默认检查
 
+- 2026-09-24 执行 `uv run --no-sync pytest -q`：113 项通过；`uv run --no-sync ruff check .` 和 `uv run --no-sync ruff format --check .` 通过。新增回归覆盖行内数学标题在目录、章节和来源索引中的渲染，以及手改同步状态只在核对清单显示一次、具体块 ID 保存在来源索引。没有模型请求或整课重跑。
 - 既有环境与构建检查：`uv sync --locked`、`uv build` 与 2026-09-09 的 `uv build --offline` 通过，源码包和 wheel 无输出、私人素材或凭据。本轮增加可选本地依赖，`uv build` 及 wheel 内容检查通过，包含 local_asr 和价格文件。
 - 2026-09-14 执行 `uv run --no-sync pytest -q`：112 项通过，13.96 秒。使用自造音视频和确定性模型替身，不访问网络、私人素材、GPU 或模型权重。
 - `uv run ruff check .` 和 `uv run ruff format --check .`：通过。
@@ -129,7 +130,7 @@ Qwen 另完成 10–20 分钟数学片段的完整 CLI 转换，产物 `output/q
 
 ## 2026-09-08：两个 case 的完整 Qwen 转换
 
-当前产物为 `output/programming-full/` 和 `output/math-full/`，阅读入口为 `output/README.md`。本页较早记录中的旧 `output/...` 产物现位于 `artifacts/archive/output-20260908-002840/` 下的对应子目录。
+2026-09-08 当次产物为 `output/programming-full/` 和 `output/math-full/`；这些目录及当时的 `output/README.md` 已不在当前工作目录。现存四门完整课时的阅读入口见[内容质量记录](content-quality.md#审阅范围与交付)。
 
 | Case | 原视频范围 | 章节 / 图 | 阶段耗时合计 | ASR 窗口 / 图文请求 |
 | --- | --- | --- | --- | --- |

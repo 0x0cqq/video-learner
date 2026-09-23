@@ -6,7 +6,7 @@
 
 P0 三条命令已实现：`inspect`、`convert`、`revise`。可将单视频转换为图文 Markdown，并局部修订文字、按时间替换完整截图，保留旧版本及非目标手改内容。
 
-自动采样处理片段尾部的帧边界，Markdown 支持列表和引用内代码块，文字修订同步维护目标范围的待核对项。对应边界与离线验证见[技术设计](docs/technical-design.md)和[验证记录](docs/validation.md)。
+自动采样处理片段尾部的帧边界，Markdown 支持列表和引用内代码块，章节标题保留行内 LaTeX。文字修订同步维护目标范围的待核对项；保留手改的块 ID 集中列在 `sources.md`，`review.md` 保留一条同步提示。对应边界与离线验证见[技术设计](docs/technical-design.md)和[验证记录](docs/validation.md)。
 
 `inspect` 分别报告媒体探测与解码结果，部分媒体探测失败时返回诊断和非零退出码；具体状态含义见[技术设计](docs/technical-design.md#2-导入与规范时间线)。
 
