@@ -12,12 +12,12 @@
 | --- | --- |
 | 环境 | Python 3.12、uv、uv.lock；Windows 为首个验证平台 |
 | CLI | Typer/Rich，参数、错误提示与 stderr 阶段进度；详细模式见[使用指南](usage.md#终端进度与详细日志) |
-| 应用 | workflows/conversion.py 编排转换，workflows/revision.py 编排修订；不依赖 Typer 对象 |
+| 应用 | workflows/conversion.py 编排转换，workflows/revision.py 编排修订，workflows/replay.py 离线核对已完成结果；不依赖 Typer 对象 |
 | 媒体 | PyAV，只读偏移流、轨道探测、seek、音频重采样 |
 | 图片 | Pillow/NumPy，全帧灰度变化、周期候选覆盖 |
 | ASR | 默认 Qwen，可选 faster-whisper CPU/CUDA，共用有界音频切片 |
 | 多模态 | DeepSeek deepseek-flash / Qwen qwen3.8-flash，窄 Provider.compose 接口 |
-| 文档 | Pydantic、确定性 Markdown 渲染、字节范围替换、Markdown 资源解析 |
+| 文档 | Pydantic、证据包与草稿的确定性应用、Markdown 渲染、字节范围替换、资源解析 |
 | 状态 | JSON、内容指纹、快照、临时目录、OS 文件锁 |
 | 验证 | pytest 自造媒体/模型替身、Ruff、独立真实样本评估 |
 
@@ -71,9 +71,15 @@ Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 tok
 
 课程文字、字幕、代码和命令均为数据；供应商没有可执行工具，素材不能授权执行程序、读取任意路径或修改规则。请求和产物不含真实密钥或签名下载 URL。机械校验只保证结构、证据边界及资源关系；事实支持、公式正确和步骤覆盖属于独立内容评估。
 
+### 可复现的业务边界
+
+转换在模型整理前保存含转写、候选帧和章节计划的 `.work/evidence.json`。每章实际使用的证据包及图片相对路径、SHA-256 组成结构版本 1 的 `CompositionInput`，在请求前写入 `.work/composition-inputs/`；通过校验并采用的 `Draft` 写入 `.work/composition-drafts/`。上一章的模型结果会影响下一章证据包，因此逐章按原顺序冻结。文字修订另保存调用时的结构化讲义和包含手改内容的 Markdown 基线，并在版本清单关联相应输入与草稿。原始模型最终正文仍保存在 `model-responses/`。
+
+`notes/composition.py` 负责从证据形成输入，以及将给定草稿确定性地应用到转换章节或修订目标；`providers` 保持外部模型适配与有界调用职责。开发工具 `tools/replay_conversion.py` 只读重建成功转换的 r001 或指定文字修订：转换逐章核对冻结输入，修订核对目标手改文本与图片，均核对采用的草稿、结构化讲义与生成的 Markdown 快照。精确换图不调用模型，由现有媒体与修订测试验证。离线重建不重发 API 请求，也不代表模型内容正确；服务端模型、思考过程、DeepSeek 完整历史及修复轮的再次生成不保证相同。
+
 ## 5. 数据与独立版本
 
-持久化数据的 Pydantic 对象为 Source、Track、TranscriptSegment、FrameEvidence、Chapter、NoteBlock、ReviewItem、Notebook。根目录初稿为 r001，修订放入 revisions/r002/ 等，清单保存父版本和内容哈希。
+持久化数据的 Pydantic 对象为 Source、Track、TranscriptSegment、FrameEvidence、CompositionInput、Draft、Chapter、NoteBlock、ReviewItem、Notebook。根目录初稿为 r001，修订放入 revisions/r002/ 等，清单保存父版本和内容哈希。
 
 ```text
 output/sample/
@@ -96,6 +102,10 @@ output/sample/
   .work/
     manifest.json
     source-local.json
+    evidence.json
+    composition-inputs/
+    composition-drafts/
+    revision-inputs/
     versions/r001.generated.md
     frames/
     audio/

@@ -30,7 +30,9 @@ CUDA 实测采用 RTX 4070 系列 12GB、CUDA 12/cuDNN 9、large-v3-turbo/int8_f
 
 ## 冻结证据回放
 
-`uv run python tools/replay_composition.py output/sample --output artifacts/replay/example --sections ch-001 ch-002` 默认只准备原有证据包，不创建模型客户端。加 `--live --secret secrets/deepseek.secret` 才发送指定章节；每次最多三章、无重试。`--context chapter|history` 比较独立逐章与完整历史策略。新输出保存 packet、draft 和 usage，输入讲义及其证据保持只读，不重复 ASR 或媒体采样。
+`uv run python tools/replay_composition.py output/sample --output artifacts/replay/example --sections ch-001 ch-002` 默认只准备证据包，不创建模型客户端。新产物使用原始调用前冻结的章节输入；较早产物从现有讲义索引重组并提示。加 `--live --secret secrets/deepseek.secret` 才发送指定章节；每次最多三章、无重试。`--context chapter|history` 比较独立逐章与所选章节历史策略，不重建未选章节或原始修复轮的完整历史。新输出保存 packet、draft 和 usage，输入讲义及其证据保持只读，不重复 ASR 或媒体采样。
+
+固定模型结果的确定性回归使用 `uv run --no-sync python tools/replay_conversion.py output/sample`；文字修订加 `--revision r002`。它重建结构化讲义并核对生成快照，不进行性能计时或模型质量评价。
 
 真实小范围对照数据见[验证记录](validation.md#固定证据的缓存对照)。缓存节省应同时观察未命中输入、已命中输入、输出长度及总费用；高命中率本身不是净省费证明。
 

@@ -16,6 +16,8 @@ P0 三条命令已实现：`inspect`、`convert`、`revise`。可将单视频转
 
 Windows 下离线测试、Ruff 和构建检查通过。语音识别默认使用阿里云 Qwen，可选本地 CPU/CUDA，来源精确到音频切片区间。四个指定课时先使用一分钟片段测试，再各建立一次整课基线并进行学习者视角审阅；测试数量、实际测量及验收限制统一见[验证记录](docs/validation.md)。
 
+新生成的转换与文字修订会保存模型调用前的证据输入和已采用草稿，可在本地只读重建并核对生成结果；方法见[使用指南](docs/usage.md#低成本审阅与独立校订稿)。
+
 默认图文模型为 DeepSeek V4.1 Flash（`deepseek-flash`），转换以有界历史前缀争取缓存命中，实际用量已用四课短片段验证。可选本地 CPU/CUDA ASR 已在当前台式机完成一分钟样本 profiling；结果与质量限制见[性能分析](docs/performance.md#本地-asr-短片段测量)及[验证记录](docs/validation.md)。
 
 ## 文档入口

@@ -9,6 +9,8 @@ from video_learner.common.config import Config
 from video_learner.common.core import US, TaskError, contained
 from video_learner.common.schemas import (
     Chapter,
+    CompositionImage,
+    CompositionInput,
     Draft,
     FrameEvidence,
     NoteBlock,
@@ -17,7 +19,6 @@ from video_learner.common.schemas import (
     TranscriptSegment,
 )
 from video_learner.common.storage import digest
-from video_learner.providers.base import Provider
 
 
 def plan_chapters(
@@ -111,6 +112,37 @@ def evidence_packet(
     return packet, [(f.id, contained(root, f.path)) for f in frames]
 
 
+def composition_input(
+    book: Notebook,
+    chapter: Chapter,
+    config: Config,
+    root: Path,
+    current_markdown: str | None = None,
+    target_ids: list[str] | None = None,
+) -> tuple[CompositionInput, list[tuple[str, Path]]]:
+    """冻结本次章节任务的证据包和图片身份，供调用及离线重放共用。"""
+    packet, images = evidence_packet(book, chapter, config, root, current_markdown, target_ids)
+    return freeze_composition_input(packet, images, root), images
+
+
+def freeze_composition_input(
+    packet: dict, images: list[tuple[str, Path]], root: Path
+) -> CompositionInput:
+    """记录实际送入模型的证据和图片内容，不保存重复的图片字节。"""
+    snapshot = CompositionInput(
+        packet=packet,
+        images=[
+            CompositionImage(
+                id=identity,
+                path=path.relative_to(root).as_posix(),
+                sha256=digest(path),
+            )
+            for identity, path in images
+        ],
+    )
+    return snapshot
+
+
 def validate_draft(draft: Draft, packet: dict) -> None:
     """检查草稿的证据边界、块类型、补充授权及正文结构；违规抛 TaskError。
 
@@ -156,16 +188,13 @@ def validate_draft(draft: Draft, packet: dict) -> None:
         raise TaskError("模型章节标题包含无效结构")
 
 
-def compose_chapter(
+def apply_chapter_draft(
     book: Notebook,
     chapter: Chapter,
-    config: Config,
-    root: Path,
-    provider: Provider,
+    packet: dict,
+    draft: Draft,
 ) -> None:
-    """调用供应商并校验草稿后更新章节，分配本地块 ID，再汇集具体疑点。"""
-    packet, images = evidence_packet(book, chapter, config, root)
-    draft = provider.compose(packet, images)
+    """只依据冻结证据与模型草稿更新章节、分配块 ID 和汇集疑点。"""
     validate_draft(draft, packet)
     chapter.title = draft.title
     chapter.blocks = []
@@ -175,6 +204,64 @@ def compose_chapter(
         chapter.blocks.append(NoteBlock(**block.model_dump(), id=identity, chapter_id=chapter.id))
     chapter.status = "completed"
     book.review.extend(chapter_review(chapter, draft.review))
+
+
+def apply_revision_draft(
+    book: Notebook,
+    chapter: Chapter,
+    target_block: NoteBlock | None,
+    target_id: str,
+    revision_id: str,
+    packet: dict,
+    draft: Draft,
+) -> bytes:
+    """只依据冻结证据和草稿替换修订目标，并保留范围外内容及疑点。"""
+    from video_learner.notes.rendering import render_block, render_chapter
+
+    validate_draft(draft, packet)
+    replaced_ids = (
+        {chapter.id, *(block.id for block in chapter.blocks)}
+        if target_block is None
+        else {target_block.id}
+    )
+    if target_block:
+        if len(draft.blocks) != 1 or draft.blocks[0].kind != target_block.kind:
+            raise TaskError("单块修订必须返回一个相同类型的块")
+        updated = NoteBlock(
+            **draft.blocks[0].model_dump(), id=target_block.id, chapter_id=chapter.id
+        )
+        chapter.blocks = [updated if block.id == updated.id else block for block in chapter.blocks]
+        replacement = render_block(updated, book).rstrip(b"\n") + b"\n"
+    else:
+        old_blocks = chapter.blocks
+        used = set()
+        new_blocks = []
+        for index, draft_block in enumerate(draft.blocks, 1):
+            # 优先复用同类型旧 ID；超出旧块数量时加入版本号，避免新旧 ID 冲突。
+            candidate = next(
+                (
+                    block
+                    for block in old_blocks
+                    if block.kind == draft_block.kind and block.id not in used
+                ),
+                None,
+            )
+            prefix = "fig" if draft_block.kind == "figure" else "blk"
+            identity = (
+                candidate.id
+                if candidate
+                else f"{prefix}-{chapter.id[3:]}-{revision_id}-{index:03d}"
+            )
+            used.add(identity)
+            new_blocks.append(
+                NoteBlock(**draft_block.model_dump(), id=identity, chapter_id=chapter.id)
+            )
+        chapter.blocks = new_blocks
+        # 整章修订保留标题，避免改写目标外的目录。
+        replacement = render_chapter(chapter, book).rstrip(b"\n") + b"\n"
+    book.review = [item for item in book.review if item.block_id not in replaced_ids]
+    book.review.extend(chapter_review(chapter, draft.review, target_id))
+    return replacement
 
 
 def chapter_review(

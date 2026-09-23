@@ -1,19 +1,19 @@
-"""复用已保存的转写、图片与章节包，默认仅离线准备；--live 才调用图文模型。"""
+"""复用已保存的转写与图片，优先读取原始章节包；--live 才调用图文模型。"""
 
 import argparse
 from pathlib import Path
 
 from video_learner.common.config import Config
-from video_learner.common.core import InputError, output_path
-from video_learner.common.schemas import Notebook
-from video_learner.common.storage import Events, read_json, write_json
+from video_learner.common.core import InputError, TaskError, contained, output_path
+from video_learner.common.schemas import CompositionInput, Notebook
+from video_learner.common.storage import Events, digest, read_json, write_json
 from video_learner.common.usage import summarize_usage
 from video_learner.notes.composition import evidence_packet
 from video_learner.providers.base import create_provider
 
 
 def main() -> None:
-    """冻结相同输入以比较提示或缓存策略，不重跑识别、不抽帧、不覆盖成功讲义。"""
+    """复用章节证据比较图文策略，不重跑识别、不抽帧、不覆盖成功讲义。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("workdir", type=Path)
     parser.add_argument("--output", type=Path, required=True)
@@ -44,7 +44,19 @@ def main() -> None:
     service = create_provider(config, events) if args.live else None
     try:
         for chapter in selected:
-            packet, images = evidence_packet(book, chapter, config, root)
+            recorded = contained(root, f".work/composition-inputs/{chapter.id}.json")
+            if recorded.is_file():
+                frozen = CompositionInput.model_validate(read_json(recorded))
+                packet = frozen.packet
+                images = []
+                for image in frozen.images:
+                    path = contained(root, image.path)
+                    if digest(path) != image.sha256:
+                        raise TaskError(f"{chapter.id} 的图片证据已经变化")
+                    images.append((image.id, path))
+            else:
+                packet, images = evidence_packet(book, chapter, config, root)
+                print(f"{chapter.id}: 原任务未保存输入，按现有索引重组证据包", flush=True)
             write_json(target / f"{chapter.id}.packet.json", packet)
             print(
                 f"{chapter.id}: {len(packet['transcript'])} 段转写 / {len(images)} 图"

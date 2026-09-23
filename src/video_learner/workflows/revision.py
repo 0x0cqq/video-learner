@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from video_learner.common.config import Config, load_config, merge_provider_settings
-from video_learner.common.core import InputError, TaskError, contained
+from video_learner.common.core import InputError, contained
 from video_learner.common.schemas import NoteBlock, Notebook, ReviewItem
 from video_learner.common.storage import (
     Events,
@@ -23,9 +23,9 @@ from video_learner.common.storage import (
 from video_learner.media.evidence import register_frame
 from video_learner.media.io import inspect_source
 from video_learner.notes.composition import (
-    chapter_review,
+    apply_revision_draft,
     evidence_packet,
-    validate_draft,
+    freeze_composition_input,
     validate_notebook,
 )
 from video_learner.notes.rendering import (
@@ -37,7 +37,6 @@ from video_learner.notes.rendering import (
     image_dependencies,
     local_image,
     render_block,
-    render_chapter,
     stage_assets,
 )
 from video_learner.providers.base import Provider, create_provider
@@ -231,6 +230,7 @@ def revise(
         staging.mkdir(parents=True, exist_ok=False)
         events = Events(root, progress)
         replacement = b""
+        record_id = None
         try:
             with events.stage(f"revise:{revision_id}"):
                 if image_operation:
@@ -293,61 +293,31 @@ def revise(
                         pinned = frame_of(book, target_block.frame_id)
                         packet["frames"] = [{"id": pinned.id, "at_us": pinned.at_us}]
                         images = [(pinned.id, contained(root, pinned.path))]
-                    draft = active_provider.compose(packet, images)
-                    validate_draft(draft, packet)
-                    replaced_ids = (
-                        {target_chapter.id, *(b.id for b in target_chapter.blocks)}
-                        if section
-                        else {target_block.id}
+                    frozen = freeze_composition_input(packet, images, root)
+                    record_id = f"{events.run_id}-{revision_id}"
+                    atomic_bytes(contained(root, f".work/revision-inputs/{record_id}.md"), current)
+                    write_json(
+                        contained(root, f".work/revision-inputs/{record_id}.json"),
+                        book.model_dump(),
                     )
-                    if target_block:
-                        if len(draft.blocks) != 1 or draft.blocks[0].kind != target_block.kind:
-                            raise TaskError("单块修订必须返回一个相同类型的块")
-                        updated = NoteBlock(
-                            **draft.blocks[0].model_dump(),
-                            id=target_block.id,
-                            chapter_id=target_chapter.id,
-                        )
-                        target_chapter.blocks = [
-                            updated if b.id == updated.id else b for b in target_chapter.blocks
-                        ]
-                        replacement = render_block(updated, book).rstrip(b"\n") + b"\n"
-                    else:
-                        old_blocks = target_chapter.blocks
-                        used = set()
-                        new_blocks = []
-                        for index, draft_block in enumerate(draft.blocks, 1):
-                            # 优先复用同类型旧 ID；超出旧块数量时加入版本号，避免新旧 ID 冲突。
-                            candidate = next(
-                                (
-                                    b
-                                    for b in old_blocks
-                                    if b.kind == draft_block.kind and b.id not in used
-                                ),
-                                None,
-                            )
-                            prefix = "fig" if draft_block.kind == "figure" else "blk"
-                            identity = (
-                                candidate.id
-                                if candidate
-                                else f"{prefix}-{target_chapter.id[3:]}-{revision_id}-{index:03d}"
-                            )
-                            used.add(identity)
-                            new_blocks.append(
-                                NoteBlock(
-                                    **draft_block.model_dump(),
-                                    id=identity,
-                                    chapter_id=target_chapter.id,
-                                )
-                            )
-                        target_chapter.blocks = new_blocks
-                        # 保留原章节标题，使目标外的目录也无需改写。
-                        replacement = render_chapter(target_chapter, book).rstrip(b"\n") + b"\n"
-                    # 仅重建文字替换范围的疑点；无目标关联的音频、字幕等全局提示保留。
-                    book.review = [
-                        item for item in book.review if item.block_id not in replaced_ids
-                    ]
-                    book.review.extend(chapter_review(target_chapter, draft.review, target_id))
+                    write_json(
+                        contained(root, f".work/composition-inputs/{record_id}.json"),
+                        frozen.model_dump(),
+                    )
+                    draft = active_provider.compose(frozen.packet, images)
+                    replacement = apply_revision_draft(
+                        book,
+                        target_chapter,
+                        target_block,
+                        target_id,
+                        revision_id,
+                        frozen.packet,
+                        draft,
+                    )
+                    write_json(
+                        contained(root, f".work/composition-drafts/{record_id}.json"),
+                        draft.model_dump(),
+                    )
                 new_current = current[: span.start] + replacement + current[span.end :]
                 validate_notebook(book, root)
                 expected_spans(new_current, book)
@@ -385,6 +355,7 @@ def revise(
                     "notes_hash": digest(contained(destination, "notes.json")),
                     "base_current_hash": current_hash,
                     "target": target_id,
+                    **({"composition_record": record_id} if record_id else {}),
                 }
                 write_json(contained(root, ".work/manifest.json"), manifest)
             return destination

@@ -9,6 +9,7 @@ from test_conversion import converted as converted
 from video_learner.common.core import InputError
 from video_learner.common.schemas import Draft, DraftBlock, Notebook
 from video_learner.notes.rendering import image_dependencies, locate
+from video_learner.workflows.replay import replay_revision
 from video_learner.workflows.revision import revise
 
 
@@ -115,6 +116,7 @@ def test_text_revision_preserves_current_bytes_and_user_assets(converted):
         json.loads((destination / "notes.json").read_text(encoding="utf-8"))["sync_status"]
         == "manual_unverified"
     )
+    assert replay_revision(root, "r002").sync_status == "manual_unverified"
 
 
 def test_exact_image_revision_needs_no_provider_and_is_portable(converted, tmp_path, monkeypatch):
@@ -213,6 +215,7 @@ def test_caption_revision_keeps_the_existing_frame(converted):
     destination = revise(root, block="fig-001-002", instruction="缩短图注", provider=Caption())
     revised = json.loads((destination / "notes.json").read_text(encoding="utf-8"))
     assert revised["chapters"][0]["blocks"][1]["frame_id"] == selected
+    assert replay_revision(root, "r002").chapters[0].blocks[1].frame_id == selected
 
 
 def test_text_revisions_refresh_only_target_review_items(converted):
@@ -257,6 +260,7 @@ def test_text_revisions_refresh_only_target_review_items(converted):
     scoped = [item for item in final.review if item.block_id is not None]
     assert [(item.block_id, item.reason) for item in scoped] == [("ch-001", "新的章节疑点")]
     assert "fig-001-002" not in (fourth / "review.md").read_text(encoding="utf-8")
+    assert replay_revision(root, "r004").chapters[0].blocks[0].body == "已重新整理的正文"
 
 
 def test_review_rejects_unknown_target(converted):

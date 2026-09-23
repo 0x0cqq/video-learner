@@ -21,7 +21,12 @@ from video_learner.common.storage import (
 from video_learner.common.usage import summarize_usage
 from video_learner.media.evidence import load_subtitles, sample_frames, save_transcript
 from video_learner.media.io import inspect_source, source_file, track_of
-from video_learner.notes.composition import compose_chapter, plan_chapters, validate_notebook
+from video_learner.notes.composition import (
+    apply_chapter_draft,
+    composition_input,
+    plan_chapters,
+    validate_notebook,
+)
 from video_learner.notes.rendering import export_book, render_notes
 from video_learner.providers.asr import transcribe, validate_asr_config
 from video_learner.providers.base import (
@@ -223,6 +228,7 @@ def convert(
                 events.emit("chapter_plan", "ready", chapters=len(book.chapters))
                 manifest["chapters"] = [c.model_dump() for c in book.chapters]
                 write_json(contained(staging, ".work/manifest.json"), manifest)
+                write_json(contained(staging, ".work/evidence.json"), book.model_dump())
             active_provider = provider or create_provider(config, events)
             compose_started = time.monotonic()
             for index, chapter in enumerate(book.chapters, 1):
@@ -236,7 +242,17 @@ def convert(
                 )
                 try:
                     with events.stage(f"compose:{chapter.id}"):
-                        compose_chapter(book, chapter, config, staging, active_provider)
+                        frozen, images = composition_input(book, chapter, config, staging)
+                        write_json(
+                            contained(staging, f".work/composition-inputs/{chapter.id}.json"),
+                            frozen.model_dump(),
+                        )
+                        draft = active_provider.compose(frozen.packet, images)
+                        apply_chapter_draft(book, chapter, frozen.packet, draft)
+                        write_json(
+                            contained(staging, f".work/composition-drafts/{chapter.id}.json"),
+                            draft.model_dump(),
+                        )
                 except TaskError as exc:
                     # 单章失败仍继续处理其他章节，但清除该章块，避免半成品被误读为完成。
                     chapter.status = "failed"

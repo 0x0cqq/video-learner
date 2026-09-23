@@ -177,7 +177,16 @@ V4.1 Flash 的 API 名称为 `deepseek-flash`。默认 `deepseek_context="histor
 
 先通读现成 notes.md，对照 sources.md 找到原转写和图片，记录问题类型、章节/块 ID、具体疑点及处理结果。分组边界不一定是话题边界，先查看后章是否已有完整论证。来源窗口保持原样；图文矛盾或原课缺少条件时明确标为待核对。
 
-需要模型重新组织时，使用 tools/replay_composition.py 冻结证据，一次最多三章，默认仅离线准备；只有 --live 才付费。复用方法见[性能分析](performance.md#冻结证据回放)。长历史造成引用校验失败时，程序在已有重试预算内隔离为当前章重新请求。
+需要模型重新组织时，使用 tools/replay_composition.py 复用章节证据，一次最多三章，默认仅离线准备；只有 --live 才付费。新生成的工作目录使用调用前保存的证据包，较早产物按现有索引重组并明确提示。复用方法见[性能分析](performance.md#冻结证据回放)。长历史造成引用校验失败时，程序在已有重试预算内隔离为当前章重新请求。
+
+要检查既有成功版本在固定模型结果下能否由当前代码重建，可运行：
+
+```powershell
+uv run --no-sync python tools/replay_conversion.py output/sample
+uv run --no-sync python tools/replay_conversion.py output/sample --revision r002
+```
+
+第一条核对 r001，第二条核对有冻结记录的文字修订。该工具只读本地证据、当次模型输入和已采用草稿，检查结构化讲义与生成快照；不请求模型、不覆盖手改、不提供任务恢复。旧产物没有冻结记录时无法进行这种离线重建；精确换图使用原有确定性修订测试验证。
 
 本地文字、标题和已确认事实的校订可编辑 notes.json 的副本，再运行：
 

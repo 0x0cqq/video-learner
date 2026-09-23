@@ -87,6 +87,18 @@ class Draft(Record):
     review: list[str] = Field(max_length=100)
 
 
+class CompositionImage(Record):
+    id: str
+    path: str
+    sha256: str
+
+
+class CompositionInput(Record):
+    schema_version: Literal[1] = 1
+    packet: dict
+    images: list[CompositionImage]
+
+
 class NoteBlock(DraftBlock):
     id: str
     chapter_id: str

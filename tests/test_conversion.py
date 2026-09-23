@@ -17,6 +17,7 @@ from video_learner.notes.rendering import (
     render_sources,
 )
 from video_learner.workflows.conversion import convert
+from video_learner.workflows.replay import replay_conversion
 
 
 class DeterministicProvider:
@@ -92,6 +93,37 @@ def test_offline_conversion_exports_references_and_versions(converted):
     assert "**原课整理" not in data.decode()
     sources = (root / "sources.md").read_text(encoding="utf-8")
     assert "blk-001-001" in sources and "tr-000001" in sources
+
+
+def test_frozen_evidence_and_draft_rebuild_the_generated_version(converted):
+    """从模型调用前的证据和已采用草稿重建讲义，验证不依赖视频或 API 的边界。"""
+    root, video = converted
+    video.unlink()
+    book = replay_conversion(root)
+    assert all(chapter.status == "completed" for chapter in book.chapters)
+    frozen = json.loads((root / ".work/composition-inputs/ch-001.json").read_text(encoding="utf-8"))
+    assert frozen["packet"]["chapter_id"] == "ch-001"
+    assert frozen["images"][0]["path"].startswith(".work/frames/")
+
+
+def test_replay_reports_changed_input_or_model_draft(converted):
+    """输入快照与模型草稿各自变化时指出所属边界，避免只比较最终文件。"""
+    root, _ = converted
+    input_path = root / ".work/composition-inputs/ch-001.json"
+    original = input_path.read_bytes()
+    frozen = json.loads(original)
+    frozen["packet"]["title"] = "被改过的标题"
+    input_path.write_text(json.dumps(frozen, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(TaskError, match="模型输入"):
+        replay_conversion(root)
+    input_path.write_bytes(original)
+
+    draft_path = root / ".work/composition-drafts/ch-001.json"
+    draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    draft["blocks"][0]["body"] = "与原生成结果不同的正文"
+    draft_path.write_text(json.dumps(draft, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(TaskError, match="讲义索引"):
+        replay_conversion(root)
 
 
 def test_math_titles_and_manual_status_keep_reading_and_index_separate(converted):
