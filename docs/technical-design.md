@@ -1,6 +1,6 @@
 # 视频转 Markdown CLI：技术设计
 
-状态：P0 已有运行实现，真实内容质量与整课验收状态见[实现指南](implementation-guide.md)。日期：2026-09-08。
+状态：P0 已有运行实现，实际验证与内容质量记录见[历史验证记录](validation.md)。
 
 本文只记录当前技术契约。需求边界以[用户故事](user-stories.md)为准；安装操作见[使用指南](usage.md)；过程与 ADR 见[实现笔记](implementation-notes.md)。
 
@@ -22,6 +22,21 @@
 | 验证 | pytest 自造媒体/模型替身、Ruff、独立真实样本评估 |
 
 代码按职责划分为 common（共享基础）、workflows（用例编排）、media（媒体与证据）、providers（模型适配）、notes（讲义组织与渲染）五个子包；根目录保留 cli.py。具体文件见[实现指南](implementation-guide.md#3-当前代码组织)。不建设空模块、通用插件框架、通用 Agent 引擎或后台服务。P1 才包含 SQLite、检查点、任务恢复、自主证据补查与复杂布局识别。
+
+### 一次转换的数据流
+
+`cli.convert_command()` 解析参数后调用 `workflows/conversion.py` 的 `convert()`。`convert()` 自行检查素材，不依赖用户先运行 `inspect`。预检完成后在输出目录旁创建临时工作目录；下表的路径均相对于该目录，成功提交后相对于用户指定的输出目录。完整目录结构见[数据与独立版本](#5-数据与独立版本)。
+
+| 顺序 | 源码与数据变化 | 保存的结果 |
+| --- | --- | --- |
+| 1. 检查与准备 | `media/io.py:inspect_source()` 产生 `Source`；`conversion.py:fingerprint_source()` 核对实际媒体、元数据和显式字幕 | `.work/source-local.json` 保存本机来源与文件哈希；`.work/manifest.json` 保存运行状态、范围和配置；`.work/logs/events.jsonl` 追加阶段事件 |
+| 2. 转写 | `providers/asr.py:transcribe()` 调用 `media/evidence.py:audio_window()`，按真实音频窗口取得 `TranscriptSegment`；显式 SRT/VTT 则由 `load_subtitles()` 提供片段 | `transcript.jsonl` 保存逐条转写证据；ASR 路径另存 `.work/audio/audio-*.wav`、同名 `.json` 时间映射及 `.work/asr-responses/audio-*.json` 识别文本；字幕路径另存 `.work/subtitle-check.json` |
+| 3. 候选画面 | `media/evidence.py:sample_frames()` 扫描变化，`register_frame()` 登记实际 PTS、时间、图片路径和哈希，形成 `FrameEvidence` | `.work/frame-scan.json`、`.work/frames.json` 与 `.work/frames/frame-*.png`；这些是候选完整帧 |
+| 4. 章节与模型前证据 | `notes/composition.py:plan_chapters()` 划分连续范围；`composition_input()` 从当前 `Notebook` 构造逐章证据包 | `.work/evidence.json` 保存整理前的转写、候选帧和章节计划；每章调用前写入 `.work/composition-inputs/ch-*.json`，包含实际证据包与图片身份 |
+| 5. 模型与草稿应用 | `providers/base.py:Provider.compose()` 取得 `Draft`；`notes/composition.py:apply_chapter_draft()` 校验并应用草稿，分配章节内的稳定块 ID | `.work/model-responses/<随机ID>.json` 保存完整返回的最终正文，包含可能未通过校验的响应；`.work/composition-drafts/ch-*.json` 只保存已采用草稿；`.work/composed.json` 逐章更新讲义状态 |
+| 6. 校验与发布 | `validate_notebook()` 检查时间、引用和图片；`notes/rendering.py:export_book()` 生成文稿与资源；`convert()` 复核源素材指纹后提交目录 | `notes.md`、`sources.md`、`review.md`、`notes.json`、`source.json`、`assets/`；`.work/versions/r001.generated.md` 保存生成字节快照，清单登记成功版本；`usage.json` 汇总本次用量 |
+
+图文模型逐章串行运行。后一章的证据包可包含已完成前章的末尾，因此每章必须在实际调用前单独冻结输入。ASR 与图文模型输出是外部结果；给定保存的转写、候选帧和已采用 `Draft` 后，章节应用、渲染及固定结果的离线核对由本地代码完成。失败目录保留诊断，不登记成功版本，也不作为 P0 断点恢复入口。
 
 ## 2. 导入与规范时间线
 
@@ -103,18 +118,23 @@ output/sample/
     manifest.json
     source-local.json
     evidence.json
+    composed.json
     composition-inputs/
     composition-drafts/
     revision-inputs/
     versions/r001.generated.md
+    frame-scan.json
+    frames.json
     frames/
     audio/
+    asr-responses/
+    subtitle-check.json
     logs/events.jsonl
     model-responses/
     conflicts/
 ```
 
-可携带来源信息不含本机绝对路径，本机源位置与完整指纹只存在 `.work/`。每版 notes.md 与 assets/ 可独立复制；手加图片位于其他安全相对目录时也要一起携带。
+`audio/` 与 `asr-responses/` 仅在运行 ASR 时生成，`subtitle-check.json` 仅在显式使用字幕时生成；修订与冲突目录也按实际操作出现。可携带来源信息不含本机绝对路径，本机源位置与完整指纹只存在 `.work/`。每版 notes.md 与 assets/ 可独立复制；手加图片位于其他安全相对目录时也要一起携带。
 
 章节和块使用独立起止 HTML 注释锚点。正文校验与定位器共用 Markdown 解析规则，支持列表、引用中的代码围栏；模型围栏必须显式闭合。定位器忽略 fenced code 与缩进代码中的类似字符串，校验唯一性、闭合、嵌套和章节归属。修订默认显式基线 r001，可通过 `--base` 指定其他版本，绝不暗选最新版本。
 
