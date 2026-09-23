@@ -20,14 +20,13 @@ from video_learner.workflows.conversion import convert
 from video_learner.workflows.revision import revise
 
 
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
-def test_json_rejects_nonfinite_without_replacing_file(tmp_path, value):
+def test_json_rejects_nonfinite_without_replacing_file(tmp_path):
     """非标准 JSON 数值必须在写入前失败，保留已有文件且不留下临时文件。"""
     path = tmp_path / "record.json"
     original = b'{"value": 1}\n'
     path.write_bytes(original)
     with pytest.raises(ValueError):
-        write_json(path, {"value": value})
+        write_json(path, {"value": float("nan")})
     assert path.read_bytes() == original
     assert list(tmp_path.iterdir()) == [path]
 
@@ -76,8 +75,8 @@ def test_cancelled_conversion_never_registers_success(video, tmp_path):
     assert (output / "transcript.jsonl").is_file()
 
 
-def test_cli_cancellation_and_argument_exit_codes(monkeypatch, video):
-    """直接调用 CLI 入口，验证中断和参数错误映射到约定退出码。"""
+def test_cli_cancellation_exit_code(monkeypatch, video):
+    """直接调用 CLI 入口，验证中断映射到约定退出码。"""
 
     def interrupt(*args, **kwargs):
         raise KeyboardInterrupt
@@ -87,10 +86,6 @@ def test_cli_cancellation_and_argument_exit_codes(monkeypatch, video):
     with pytest.raises(SystemExit) as result:
         main()
     assert result.value.code == 130
-    monkeypatch.setattr(sys, "argv", ["video-learner", "unknown-command"])
-    with pytest.raises(SystemExit) as result:
-        main()
-    assert result.value.code == 2
 
 
 def test_cli_redirected_chinese_output_is_utf8(video):

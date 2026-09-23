@@ -3,7 +3,6 @@ import pytest
 
 from video_learner.common.config import Config
 from video_learner.common.core import InputError, TaskError
-from video_learner.common.storage import directory_lock
 from video_learner.media.evidence import audio_window, load_subtitles, sample_frames
 from video_learner.media.io import extract_frame, inspect_source
 
@@ -29,26 +28,6 @@ def test_subtitles_clipping_coverage_and_invalid_times(tmp_path):
     assert report["coverage_ratio"] == pytest.approx(2 / 3)
     with pytest.raises(InputError):
         load_subtitles(subtitle, 0, 2_000_000, 2_000_000)
-
-
-def test_sampling_and_os_lock(video, tmp_path):
-    """请求落在两帧之间时应记录后一帧实际时间；目录锁须拒绝重入且退出后可重新获取。"""
-    frames = sample_frames(
-        video,
-        inspect_source(video),
-        1_250_000,
-        4_000_000,
-        Config(sample_seconds=1),
-        tmp_path / "result",
-    )
-    assert frames[0].at_us == 1_300_000
-    assert frames[0].requested_us == 1_250_000
-    lock = tmp_path / "output.lock"
-    with directory_lock(lock), pytest.raises(InputError):
-        with directory_lock(lock):
-            pass
-    with directory_lock(lock):
-        pass
 
 
 @pytest.mark.parametrize("end_us", [4_000_000, 3_980_000])

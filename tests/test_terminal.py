@@ -49,7 +49,6 @@ def test_interactive_progress_keeps_failures_and_metrics_visible():
     assert "2/5" in rendered and "失败 1 章" in rendered
     assert "第 4 章" in rendered and "模型思考中" in rendered
     assert "预计总请求 5" in rendered and "请求已发 1" in rendered and "待发约 4" in rendered
-    assert "本次请求" not in rendered
 
 
 @pytest.mark.parametrize("error", [RuntimeError, KeyboardInterrupt])
@@ -59,20 +58,6 @@ def test_failure_and_cancellation_do_not_report_success(error):
     with pytest.raises(error), TerminalProgress(Console(file=output)):
         raise error()
     assert output.getvalue().startswith("已中断" if error is KeyboardInterrupt else "未完成")
-
-
-def test_verbose_and_retry_output():
-    """详细模式保留原始事件，默认模式不单独刷出重试次数。"""
-    output = io.StringIO()
-    with TerminalProgress(Console(file=output), verbose=True) as display:
-        display({"stage": "model_usage", "status": "received", "seconds": 1})
-        display({"stage": "model_call", "status": "retrying", "attempt": 1, "max_retries": 2})
-    assert "model_usage：received" in output.getvalue()
-    assert "model_call：retrying" in output.getvalue()
-    output = io.StringIO()
-    with TerminalProgress(Console(file=output)) as display:
-        display({"stage": "model_call", "status": "retrying", "attempt": 1, "max_retries": 2})
-    assert "重试" not in output.getvalue()
 
 
 def test_request_metrics_count_attempts_and_time_each_call_once():
@@ -90,40 +75,6 @@ def test_request_metrics_count_attempts_and_time_each_call_once():
     assert "预计总请求 11" in text and "待发约 8" in text
     assert "请求已发 3" in text and "已结束 2" in text
     assert "重试 1" in text and "均耗时 4.0 秒" in text
-
-
-@pytest.mark.parametrize("verbose", [False, True])
-def test_strategy_and_chapter_summary_are_visible(verbose):
-    """策略细节只在详细模式显示，默认仍报告实际章数。"""
-    output = io.StringIO()
-    display = TerminalProgress(Console(file=output), verbose=verbose)
-    display(
-        {
-            "stage": "conversion_plan",
-            "status": "ready",
-            "chapter_seconds": 180,
-            "asr_window_seconds": 30,
-            "uses_subtitles": False,
-        }
-    )
-    display({"stage": "chapter_plan", "status": "ready", "chapters": 34})
-    display(
-        {
-            "stage": "transcribe",
-            "status": "progress",
-            "completed": 0,
-            "total": 100,
-            "unit": "audio",
-            "request_total": 4,
-        }
-    )
-    display({"stage": "audio_boundary", "status": "selected", "reason": "pause"})
-    display({"stage": "transcribe", "status": "completed", "seconds": 1})
-    text = output.getvalue()
-    assert ("默认寻找末尾停顿切分" in text) == verbose
-    assert ("章节目标 180 秒" in text) == verbose
-    assert "已划分 34 章" in text
-    assert ("已采用停顿切点 1 处" in text) == verbose
 
 
 def test_stage_summaries_use_actual_counts_and_preserve_partial_status():

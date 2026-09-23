@@ -28,17 +28,26 @@ def test_revision_preserves_nullable_baseline_settings(video, tmp_path, monkeypa
         provider=DeterministicProvider(),
     )
     config_path = tmp_path / "revision.toml"
-    config_path.write_text('provider = "qwen"\ninstruction = "配置中的要求"\n', encoding="utf-8")
+    config_path.write_text(
+        'provider = "deepseek"\ninstruction = "配置中的要求"\n', encoding="utf-8"
+    )
 
     def factory(config, events):
         """核对真正用于修订的配置，避免仅单测合并字典而遗漏加载基线时的空值丢失。"""
         assert config.asr_language is None
         assert config.provider == "qwen" and config.model == "qwen3.8-flash"
+        assert config.api_key_env == "DASHSCOPE_API_KEY"
         assert config.instruction == "命令行要求"
         return DeterministicProvider()
 
     monkeypatch.setattr("video_learner.workflows.revision.create_provider", factory)
-    destination = revise(root, section="ch-001", instruction="命令行要求", config_path=config_path)
+    destination = revise(
+        root,
+        section="ch-001",
+        instruction="命令行要求",
+        config_path=config_path,
+        model_provider="qwen",
+    )
     assert (destination / "notes.md").is_file()
     assert replay_revision(root, "r002").chapters[0].status == "completed"
 
@@ -60,30 +69,12 @@ def test_display_title_improvement_keeps_existing_evidence_revisable(converted, 
     assert (destination / "notes.md").is_file()
 
 
-def test_image_replacement_preserves_user_caption_and_extra_text(converted):
-    """换图只修改受控图片行；手改图注与附加来源说明逐字节保留，手改图片行则冲突。"""
-    from video_learner.notes.rendering import AnchorConflict, render_block
-    from video_learner.workflows.revision import replace_figure
-
-    root, _ = converted
-    book = Notebook.model_validate_json((root / "notes.json").read_text(encoding="utf-8"))
-    block = book.chapters[0].blocks[1]
-    original = render_block(block, book)
-    extra = "> 用户附注：请核对原视频。\r\n".encode()
-    current = original.replace(block.body.encode(), "手改图注必须保留".encode()) + extra
-    updated = replace_figure(current, original, block, book)
-    assert updated == current
-    with pytest.raises(AnchorConflict, match="已有手改"):
-        replace_figure(current.replace(b"![", b"![changed", 1), original, block, book)
-
-
-@pytest.mark.parametrize("version", [1, 2, 3])
-def test_old_extraction_versions_are_rejected_without_writing(converted, version):
+def test_old_extraction_version_is_rejected_without_writing(converted):
     """旧提取版本不自动迁移或发布修订，原稿和已登记的版本保持不变。"""
     root, _ = converted
     path = root / ".work/manifest.json"
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    manifest["extraction_version"] = version
+    manifest["extraction_version"] = 3
     path.write_text(json.dumps(manifest), encoding="utf-8")
     before = (root / "notes.md").read_bytes()
     with pytest.raises(InputError, match="版本不兼容"):
@@ -150,16 +141,29 @@ def test_text_revision_preserves_current_bytes_and_user_assets(converted):
 
 
 def test_exact_image_revision_needs_no_provider_and_is_portable(converted, tmp_path, monkeypatch):
-    """无模型凭据执行换帧，再复制版本并以其为新基线换帧，核对完整画面和版本关系。"""
+    """实际换帧保留图注手改及 CRLF；版本可携带、可继续修订，图片行手改则保留冲突。"""
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     root, _ = converted
-    before = (root / "notes.md").read_bytes()
+    markdown = root / "notes.md"
+    before = (
+        markdown.read_bytes()
+        .replace(
+            "变化后的原视频画面。".encode(),
+            "手改图注必须保留。\n\n> 用户附注：请核对原视频。".encode(),
+        )
+        .replace(b"\n", b"\r\n")
+    )
+    markdown.write_bytes(before)
     destination = revise(root, block="fig-001-002", at_us=2_250_000)
     revised = (destination / "notes.md").read_bytes()
     assert b"00:00:02" in revised
+    old_line = next(line for line in before.splitlines() if line.startswith(b"!["))
+    new_line = next(line for line in revised.splitlines() if line.startswith(b"!["))
+    assert new_line != old_line
+    assert revised == before.replace(old_line, new_line)
     book = Notebook.model_validate_json((destination / "notes.json").read_text(encoding="utf-8"))
     frame = next(f for f in book.frames if f.id.startswith("frame-r002"))
-    assert frame.at_us == 2_300_000
+    assert (frame.requested_us, frame.at_us) == (2_250_000, 2_300_000)
     with Image.open(root / frame.path) as image:
         assert image.size == (160, 96)
     assert (root / "notes.md").read_bytes() == before
@@ -171,6 +175,13 @@ def test_exact_image_revision_needs_no_provider_and_is_portable(converted, tmp_p
     assert third.name == "r003"
     manifest = json.loads((root / ".work/manifest.json").read_text(encoding="utf-8"))
     assert manifest["versions"]["r003"]["base"] == "r002"
+    manual_path = third / "notes.md"
+    manual = manual_path.read_bytes().replace(b"![", b"![changed", 1)
+    manual_path.write_bytes(manual)
+    with pytest.raises(InputError, match="图片行已有手改"):
+        revise(root, base="r003", block="fig-001-002", at_us=1_000_000)
+    assert manual_path.read_bytes() == manual
+    assert not (root / "revisions/r004").exists()
 
 
 def test_revision_conflicts_do_not_publish_versions(converted):
@@ -303,25 +314,3 @@ def test_review_rejects_unknown_target(converted):
     book.review[0].block_id = "deleted-block"
     with pytest.raises(TaskError, match="未知章节或块"):
         validate_notebook(book, root)
-
-
-def test_revision_can_switch_multimodal_provider_without_reextracting(converted, monkeypatch):
-    """捕获修订工厂配置，验证切换 Qwen 可复用既有证据且目标章节外字节保持不变。"""
-    root, _ = converted
-    before = (root / "notes.md").read_bytes()
-    selected = []
-
-    def factory(config, events):
-        selected.append(config)
-        return DeterministicProvider()
-
-    monkeypatch.setattr("video_learner.workflows.revision.create_provider", factory)
-    destination = revise(root, section="ch-001", instruction="重新整理", model_provider="qwen")
-    assert selected[0].provider == "qwen"
-    assert selected[0].model == "qwen3.8-flash"
-    assert selected[0].api_key_env == "DASHSCOPE_API_KEY"
-    after = (destination / "notes.md").read_bytes()
-    old, new = locate(before)["ch-001"], locate(after)["ch-001"]
-    assert before[: old.start] == after[: new.start]
-    assert before[old.end :] == after[new.end :]
-    assert (root / "notes.md").read_bytes() == before

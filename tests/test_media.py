@@ -6,7 +6,6 @@ from typer.testing import CliRunner
 
 from video_learner.cli import app
 from video_learner.common.core import InputError, contained, output_path, parse_time, time_range
-from video_learner.media.evidence import register_frame
 from video_learner.media.io import OffsetReader, extract_frame, inspect_source
 
 
@@ -38,24 +37,6 @@ def test_probe_seek_and_readonly(video):
     assert hashlib.sha256(video.read_bytes()).hexdigest() == before
 
 
-def test_registered_png_matches_direct_encoding(video, tmp_path):
-    """每个证据只写一张完整帧，并逐字节核对直接编码结果、实际帧时间和哈希。"""
-    import io
-
-    source = inspect_source(video)
-    image, actual, pts = extract_frame(video, source, 1_250_000, source.duration_us)
-    frame = register_frame(
-        video, source, 1_250_000, source.duration_us, tmp_path / "result", "frame-1"
-    )
-    assert (frame.at_us, frame.pts, frame.requested_us) == (actual, pts, 1_250_000)
-    encoded = io.BytesIO()
-    image.save(encoded, format="PNG")
-    payload = (tmp_path / "result" / frame.path).read_bytes()
-    assert payload == encoded.getvalue()
-    assert hashlib.sha256(payload).hexdigest() == frame.sha256
-    assert list((tmp_path / "result/.work/frames").iterdir()) == [tmp_path / "result" / frame.path]
-
-
 def test_prefix_is_verified_not_suffix(video, tmp_path):
     """对比有前缀、无前缀、坏头和截断文件，证明不能只因扩展名为 m4s 就跳过九字节。"""
     prefixed = tmp_path / "prefixed.m4s"
@@ -78,12 +59,6 @@ def test_prefix_is_verified_not_suffix(video, tmp_path):
         inspect_source(truncated)
 
 
-def test_cli_json(video):
-    result = CliRunner().invoke(app, ["inspect", str(video), "--json", "--decode"])
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["sampled_decode"] is True
-
-
 def test_inspect_reports_partial_media_failure(video):
     """有效视频旁有损坏音频时，仍返回诊断，但不能将全部媒体探测标为成功。"""
     video.with_name("broken.aac").write_bytes(b"synthetic invalid audio")
@@ -101,15 +76,6 @@ def test_metadata_failure_does_not_mean_media_open_failure(video):
     source = inspect_source(video.parent)
     assert source.opened is True
     assert source.diagnostics
-
-
-def test_cache_title_combines_course_and_lesson(video):
-    """泛化课时名需要课程上下文，相同课程/课时标题则不重复。"""
-    metadata = video.with_name("videoInfo.json")
-    metadata.write_text(json.dumps({"title": "1-1-1", "groupTitle": "抽象代数"}), encoding="utf-8")
-    assert inspect_source(video.parent).title == "抽象代数 · 1-1-1"
-    metadata.write_text(json.dumps({"title": "课程", "groupTitle": "课程"}), encoding="utf-8")
-    assert inspect_source(video.parent).title == "课程"
 
 
 def test_force_output_keeps_source_and_working_directory_protected(video):

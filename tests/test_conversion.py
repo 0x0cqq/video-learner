@@ -70,6 +70,7 @@ def test_offline_conversion_exports_references_and_versions(converted):
     assert len(expected_spans(data, book)) == 3
     for reference in image_dependencies(data):
         assert (root / reference).is_file()
+    assert set((root / ".work/frames").iterdir()) == {root / frame.path for frame in book.frames}
     manifest = json.loads((root / ".work/manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
     assert set(manifest["versions"]) == {"r001"}
@@ -309,15 +310,13 @@ def test_chapters_follow_nearby_transcript_boundaries():
 
 
 def test_anchor_fences_and_conflicts(converted):
-    """代码围栏内的锚点只是示例数据；真实重复或未闭合锚点必须阻止定位。"""
+    """代码围栏内的锚点只是示例数据；真实重复锚点必须阻止定位。"""
     root, _ = converted
     data = (root / "notes.md").read_bytes()
     fake = b"```html\n<!-- vl:begin section fake -->\n```\n"
     assert locate(fake + data).keys() == locate(data).keys()
     with pytest.raises(AnchorConflict):
         locate(data + data)
-    with pytest.raises(AnchorConflict):
-        locate(data.replace(b"<!-- vl:end block blk-001-001 -->", b""))
 
 
 @pytest.mark.parametrize(

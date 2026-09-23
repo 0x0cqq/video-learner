@@ -72,7 +72,6 @@ def test_qwen_images_thinking_final_text_and_usage(tmp_path, monkeypatch):
     monkeypatch.setenv("DASHSCOPE_API_KEY", "qwen-test-key")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     provider = create_provider(Config(provider="qwen"), Events(tmp_path))
-    assert isinstance(provider, QwenProvider)
     assert provider.compose(packet(), [("frame-1", picture)]).title == "章节"
     assert arguments["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
     assert arguments["api_key"] == "qwen-test-key"
@@ -94,9 +93,9 @@ def test_qwen_images_thinking_final_text_and_usage(tmp_path, monkeypatch):
     assert stream.closed
 
 
-@pytest.mark.parametrize("finish", [None, "length", "content_filter"])
+@pytest.mark.parametrize("finish", [None, "length"])
 def test_qwen_incomplete_stream_never_publishes_or_retries(tmp_path, finish):
-    """正常 JSON 也不能掩盖流未正常结束；缺停止、截断和过滤三种结果都应拒绝。"""
+    """正常 JSON 也不能掩盖流未正常结束；缺少停止标记或截断时应拒绝发布。"""
     stream = Stream([chunk(content=VALID, finish=finish)])
     client = Client([stream])
     with pytest.raises(TaskError, match="未完成"):

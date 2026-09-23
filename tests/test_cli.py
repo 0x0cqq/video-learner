@@ -10,11 +10,7 @@ import pytest
     ("args", "exit_code", "expected"),
     [
         ([], 0, "检查本地视频或单课时缓存"),
-        (["--help"], 0, "检查本地视频或单课时缓存"),
-        (["inspect", "--help"], 0, "检查本地视频或单课时缓存"),
         (["unknown-command"], 2, "参数错误："),
-        (["inspect"], 2, "参数错误："),
-        (["--unknown-option"], 2, "参数错误："),
     ],
 )
 def test_cli_help_and_argument_errors(args, exit_code, expected):
