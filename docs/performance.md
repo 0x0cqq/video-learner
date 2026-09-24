@@ -22,7 +22,7 @@ ASR 的并发设置见[使用指南](usage.md#asr-并发)，图文整理保持�
 
 `uv run python tools/replay_composition.py output/sample --output artifacts/replay/example --sections ch-001 ch-002` 默认只准备证据包，不创建模型客户端。新产物使用原始调用前冻结的章节输入；较早产物从现有讲义索引重组并提示。加 `--live --secret secrets/deepseek.secret` 才发送指定章节；每次最多三章、无重试。`--context chapter|history` 比较独立逐章与所选章节历史策略，不重建未选章节或原始修复轮的完整历史。新输出保存 packet、draft 和 usage，输入讲义及其证据保持只读，不重复 ASR 或媒体采样。
 
-固定模型结果的确定性回归使用 `uv run --no-sync python tools/replay_conversion.py output/sample`；文字修订加 `--revision r002`。它重建结构化讲义并核对生成快照，不进行性能计时或模型质量评价。
+固定模型结果的确定性回归使用 `uv run --no-sync python tools/replay_conversion.py output/sample`；文字修订或独立复审加 `--revision r002`。它重建结构化讲义并核对生成快照，不进行性能计时或模型质量评价。
 
 真实小范围对照数据见[验证记录](validation.md#固定证据的缓存对照)。缓存节省应同时观察未命中输入、已命中输入、输出长度及总费用；高命中率本身不是净省费证明。
 
@@ -33,3 +33,5 @@ ASR 的并发设置见[使用指南](usage.md#asr-并发)，图文整理保持�
 `uv run --no-sync python tools/audit_coverage.py output/sample --output artifacts/evaluations/sample-coverage` 读取已完成讲义的 `notes.json`，在独立新目录写入逐章覆盖表和 JSON。报告区分采集候选、冻结输入中实际提供的图片、正文选用图片，并列出最长配图时间间隔，便于定位应审阅的章节。
 
 旧产物缺少冻结输入时，实际送图数标为未知；工具不反向解析 Markdown 手改。图片数量和时间间隔仅用于发现审阅位置，语义对应及关键画面是否遗漏仍须对照转写和原帧判断。工具不调用模型、不改变讲义。
+
+添加 `--revision r002` 可检查显式复审版，实际送图读取该版的冻结复审输入；该版未复审的章节标为未知。阶段计时按第一次运行的 run_id 汇总，包含转换内的独立复审，随后单独复审和修订不混入转换统计。

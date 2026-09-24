@@ -5,7 +5,7 @@ import pytest
 
 from video_learner.common.config import Config
 from video_learner.common.core import InputError, TaskError
-from video_learner.common.schemas import Draft, DraftBlock, Notebook
+from video_learner.common.schemas import Draft, DraftBlock, FrameAssessment, Notebook, ReviewPass
 from video_learner.notes.rendering import (
     MARKDOWN,
     AnchorConflict,
@@ -21,6 +21,23 @@ from video_learner.workflows.replay import replay_conversion
 
 
 class DeterministicProvider:
+    def review(self, packet, images):
+        """接受原配图并清除替身提示，只验证独立复审的版本与证据契约。"""
+        selected = {b["frame_id"] for b in packet["chapter"]["blocks"] if b["kind"] == "figure"}
+        return ReviewPass(
+            frames=[
+                FrameAssessment(
+                    frame_id=frame["id"],
+                    decision="use" if frame["id"] in selected else "omit",
+                    related_block_id=packet["chapter"]["blocks"][0]["id"],
+                    transcript_ids=[],
+                    reason="自造画面测试；保持初稿配图。",
+                )
+                for frame in packet["frames"]
+            ],
+            findings=[],
+        )
+
     def compose(self, packet, images):
         """固定引用首条转写和首张候选图，隔离云端质量波动，仅验证转换的证据与文件契约。"""
         evidence = packet["transcript"][0]["id"]
@@ -55,7 +72,7 @@ def converted(video, tmp_path):
     root = convert(
         video,
         tmp_path / "output",
-        Config(sample_seconds=1),
+        Config(sample_seconds=1, review_pass=False),
         subtitle=subtitle,
         provider=DeterministicProvider(),
     )
@@ -219,6 +236,7 @@ def test_force_cli_replaces_old_output(converted, monkeypatch):
             "--subtitle",
             str(video.with_suffix(".srt")),
             "-f",
+            "--no-review",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -340,7 +358,13 @@ def test_nested_code_blocks_convert_and_revise(video, tmp_path, body):
 
     subtitle = video.with_suffix(".srt")
     subtitle.write_text("1\n00:00:00,000 --> 00:00:04,000\n测试\n", encoding="utf-8")
-    root = convert(video, tmp_path / "code", Config(), subtitle=subtitle, provider=CodeProvider())
+    root = convert(
+        video,
+        tmp_path / "code",
+        Config(review_pass=False),
+        subtitle=subtitle,
+        provider=CodeProvider(),
+    )
     path = root / "notes.md"
     before = path.read_bytes().replace(b"\n", b"\r\n")
     path.write_bytes(before)

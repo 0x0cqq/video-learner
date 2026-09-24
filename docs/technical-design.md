@@ -35,6 +35,7 @@
 | 4. 章节与模型前证据 | `notes/composition.py:plan_chapters()` 划分连续范围；`composition_input()` 从当前 `Notebook` 构造逐章证据包 | `.work/evidence.json` 保存整理前的转写、候选帧和章节计划；每章调用前写入 `.work/composition-inputs/ch-*.json`，包含实际证据包与图片身份 |
 | 5. 模型与草稿应用 | `providers/base.py:Provider.compose()` 取得 `Draft`；`notes/composition.py:apply_chapter_draft()` 校验并应用草稿，分配章节内的稳定块 ID | `.work/model-responses/<随机ID>.json` 保存完整返回的最终正文，包含可能未通过校验的响应；`.work/composition-drafts/ch-*.json` 只保存已采用草稿；`.work/composed.json` 逐章更新讲义状态 |
 | 6. 校验与发布 | `validate_notebook()` 检查时间、引用和图片；`notes/rendering.py:export_book()` 生成文稿与资源；`convert()` 复核源素材指纹后提交目录 | `notes.md`、`sources.md`、`review.md`、`notes.json`、`source.json`、`assets/`；`.work/versions/r001.generated.md` 保存生成字节快照，清单登记成功版本；`usage.json` 汇总本次用量 |
+| 7. 独立复审 | `notes/reviewing.py:review_input()` 冻结基线和原证据；`Provider.review()` 返回逐图判断及局部修改；`apply_review_pass()` 确定性应用 | 默认写入独立 r002；`.work/reviews/` 保存复审基线、逐章输入和结果，可离线重放；原 r001 保留 |
 
 图文模型逐章串行运行。后一章的证据包可包含已完成前章的末尾，因此每章必须在实际调用前单独冻结输入。章节在转写后规划一次，启动时报告目标章长。ASR 与图文模型输出是外部结果；给定保存的转写、候选帧和已采用 `Draft` 后，章节应用、渲染及固定结果的离线核对由本地代码完成。失败目录保留诊断，不登记成功版本，也不作为 P0 断点恢复入口。
 
@@ -86,7 +87,17 @@ Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 tok
 
 编程保留目标、修改、错误、修复和运行结果；数学保留原课中存在的假设、符号、关键推导、结论和条件；混合内容按实际材料组织，不强行填模板。内容分为原课整理、显式要求的 AI 补充解释和待核对。模糊公式、代码和未交代条件进入疑点清单。
 
-正文直接讲解课程内容，不逐图描述或堆放转写。图注允许为空，文字块必须非空；图意自明或已由正文解释时省略图注，不强求每章配图。提示词版本为 p0-6。原课类别、块 ID、来源区间、证据列表和手改同步状态放入 `sources.md`；`review.md` 列出内容疑点并以单条提示标明手改状态。正文仅显式标记 AI 补充和待核对，保留隐藏修订锚点。标题中的行内 LaTeX 保留原命令，标题其余 Markdown 控制字符转义。
+正文直接讲解课程内容，不逐图描述或堆放转写。图注允许为空，文字块必须非空；图意自明或已由正文解释时省略图注，不强求每章配图。提示词版本为 p0-7。原课类别、块 ID、来源区间、证据列表和手改同步状态放入 `sources.md`；`review.md` 列出内容疑点并以单条提示标明手改状态。正文仅显式标记 AI 补充和待核对，保留隐藏修订锚点。标题中的行内 LaTeX 保留原命令，标题其余 Markdown 控制字符转义。
+
+证据包版本 2 用 `boundary_context_not_citable.before/after` 区分边界方向，每张帧的 `speech_window_ids` 指向其实际所在音频窗口。这个关系只表示时间邻近，不表示语义匹配，也不创造句级时间戳。正文确定性检查拒绝当前证据 ID 泄漏和章节末尾空标题，保留代码围栏中的字面示例；旧冻结包按原契约离线重建。
+
+### 独立模型复审
+
+`review_pass=true` 默认在 r001 提交后复审全部章节；`revise --review` 对显式成功基线复审整篇或指定章。复审逐章使用同一份冻结基线、实际 Markdown、原始转写、候选图及相邻章节首尾，不继承模型生成会话，也不让已修改章节改变后续复审输入。已有引用图片优先送入，剩余额度均匀补候选，图片预算与原提取配置一致。
+
+`ReviewPass` 包含全部候选的 `FrameAssessment` 和局部 `ReviewFinding`。逐图判断给出采用/省略、支撑的原文字块、语音引用与理由；本地代码将采用的图片放在关联解释后，省略未选图，新增图默认无图注。文字修改、已有图注纠正和实质疑点分别记录为替换、插入或报告；证据和目标必须属于本次范围，同一块最多一次修改。基于稳定块 ID 比较新旧序列，仅拼接变化范围，保留其他字节；移动原图时保留手改图注。选图理由留在工作记录与 changes.md，未解决的疑点进入 review.md。模型复审仍需人工抽查事实和读图。
+
+复审沿用目录锁、源指纹、并发编辑检查、版本独立导出和原子提交。初稿与复审共用 `max_calls` 预算，关闭复审只产生 r001。复审失败时保留成功初稿并报告失败，失败复审不登记新版本。输入、结果及基线存于 `.work/reviews/<记录ID>/`，清单关联 `review_record`；`replay_revision()` 重建逐章输入、图片身份及最终讲义。单独复审的用量按运行保存并复制到成功版本，转换中的复审计入根目录总用量。
 
 课程文字、字幕、代码和命令均为数据；供应商没有可执行工具，素材不能授权执行程序、读取任意路径或修改规则。请求和产物不含真实密钥或签名下载 URL。机械校验只保证结构、证据边界及资源关系；事实支持、公式正确和步骤覆盖属于独立内容评估。
 
@@ -104,7 +115,7 @@ Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 tok
 
 ## 5. 数据与独立版本
 
-持久化数据的 Pydantic 对象为 Source、Track、TranscriptSegment、FrameEvidence、CompositionInput、Draft、Chapter、NoteBlock、ReviewItem、Notebook。根目录初稿为 r001，修订放入 revisions/r002/ 等，清单保存父版本和内容哈希。
+持久化数据的 Pydantic 对象为 Source、Track、TranscriptSegment、FrameEvidence、CompositionInput、Draft、ReviewPass、FrameAssessment、ReviewFinding、Chapter、NoteBlock、ReviewItem、Notebook。根目录初稿为 r001，修订放入 revisions/r002/ 等，清单保存父版本和内容哈希。
 
 ```text
 output/sample/
@@ -132,6 +143,8 @@ output/sample/
     composition-inputs/
     composition-drafts/
     revision-inputs/
+    reviews/
+    review-usage/
     versions/r001.generated.md
     frame-scan.json
     frames.json

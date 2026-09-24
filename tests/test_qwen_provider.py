@@ -72,7 +72,8 @@ def test_qwen_images_thinking_final_text_and_usage(tmp_path, monkeypatch):
     monkeypatch.setenv("DASHSCOPE_API_KEY", "qwen-test-key")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     provider = create_provider(Config(provider="qwen"), Events(tmp_path))
-    assert provider.compose(packet(), [("frame-1", picture)]).title == "章节"
+    evidence = {**packet(), "frames": [{"id": "frame-1", "at_us": 0}]}
+    assert provider.compose(evidence, [("frame-1", picture)]).title == "章节"
     assert arguments["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
     assert arguments["api_key"] == "qwen-test-key"
     request = client.requests[0]

@@ -60,6 +60,7 @@ class Config(Record):
     profile: Literal["programming", "math", "mixed"] = "mixed"
     instruction: str = ""
     allow_ai_additions: bool = False
+    review_pass: bool = True
     asr_backend: Literal["qwen", "local"] = "qwen"
     asr_device: Literal["cpu", "cuda"] = "cpu"
     asr_local_model: str | None = None

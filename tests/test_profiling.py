@@ -41,6 +41,30 @@ def test_stage_summary_does_not_double_count_or_mix_revisions():
     report = module.render_report({"concurrent": result, "empty": module.summarize_events([])})
     assert "累计 26.0s" in report and "并发请求可重叠" in report
     assert "%" not in report
+    # 同一次转换新增的复审计入总量，随后单独复审不能覆盖重置的调用编号。
+    current = [{**row, "run_id": "initial"} for row in records[:10]]
+    current.extend(
+        [
+            {"stage": "review", "status": "completed", "seconds": 4, "run_id": "initial"},
+            {
+                "stage": "model_usage",
+                "status": "received",
+                "call": 4,
+                "seconds": 4,
+                "run_id": "initial",
+            },
+            {
+                "stage": "model_usage",
+                "status": "received",
+                "call": 1,
+                "seconds": 99,
+                "run_id": "later",
+            },
+        ]
+    )
+    revised = module.summarize_events(current)
+    assert revised["stage_seconds_total"] == 26
+    assert revised["model_requests"]["sum_seconds"] == 14
 
 
 def test_stream_timing_separates_first_chunks_and_excludes_thinking_text(tmp_path, monkeypatch):

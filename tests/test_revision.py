@@ -23,7 +23,7 @@ def test_revision_preserves_nullable_baseline_settings(video, tmp_path, monkeypa
     root = convert(
         video,
         tmp_path / "nullable",
-        Config(asr_language=None),
+        Config(asr_language=None, review_pass=False),
         subtitle=subtitle,
         provider=DeterministicProvider(),
     )

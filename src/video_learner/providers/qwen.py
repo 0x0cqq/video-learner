@@ -8,10 +8,8 @@ from video_learner.common.config import Config
 from video_learner.common.core import TaskError
 from video_learner.common.storage import Events
 from video_learner.providers.base import (
-    SYSTEM_PROMPT,
     DeepSeekProvider,
     credential,
-    strict_schema,
     validate_provider_config,
 )
 
@@ -50,13 +48,13 @@ class QwenProvider(DeepSeekProvider):
         if self.config.qwen_enable_thinking:
             options["thinking_budget"] = self.config.qwen_thinking_budget
         started = time.monotonic()
-        schema = strict_schema()
+        schema = self._schema
         stream = self.client.chat.completions.create(
             model=self.config.model,
             messages=[
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT + "\nJSON schema:\n" + json.dumps(schema),
+                    "content": self._system_prompt + "\nJSON schema:\n" + json.dumps(schema),
                 },
                 {"role": "user", "content": parts},
             ],

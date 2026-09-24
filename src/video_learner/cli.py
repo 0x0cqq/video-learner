@@ -77,6 +77,10 @@ def convert_command(
         int | None, typer.Option(min=1, max=32, help="ASR 并发数，默认 1；图文仍串行")
     ] = None,
     secret: Path | None = None,
+    review: Annotated[
+        bool | None,
+        typer.Option("--review/--no-review", help="初稿完成后独立复审并保存新版本，默认启用"),
+    ] = None,
     allow_ai_additions: Annotated[
         bool | None, typer.Option("--allow-ai-additions/--no-ai-additions")
     ] = None,
@@ -99,6 +103,7 @@ def convert_command(
         jobs=jobs,
         secret_file=str(secret) if secret else None,
         allow_ai_additions=allow_ai_additions,
+        review_pass=review,
     )
     reports = []
     try:
@@ -121,8 +126,8 @@ def convert_command(
 
 
 def display_usage(report: dict) -> None:
-    """向 stderr 展示本次转换 token 与估价，缺失用量和部分费用不显示为完整总价。"""
-    table = Table(title="Token meter · 本次转换")
+    """向 stderr 展示本次运行 token 与估价，缺失用量和部分费用不显示为完整总价。"""
+    table = Table(title="Token meter · 本次运行")
     for heading in ("模型", "请求", "输入 token", "输出 token", "音频秒数", "Estimated 费用"):
         table.add_column(heading)
     for row in report["models"]:
@@ -163,6 +168,7 @@ def revise_command(
     block: str | None = None,
     instruction: str | None = None,
     frame: str | None = None,
+    review: bool = typer.Option(False, "--review", help="独立复审整份讲义，或 --section 指定章节"),
     config: Path | None = None,
     secret: Path | None = None,
     provider: Annotated[str | None, typer.Option(help="图文模型供应商 deepseek 或 qwen")] = None,
@@ -172,10 +178,34 @@ def revise_command(
     ] = None,
     verbose: bool = typer.Option(False, "--verbose", help="显示详细阶段事件"),
 ) -> None:
-    """基于指定版本，只修订目标章节/段落或精确换图。"""
+    """基于指定版本修订目标章节/段落、精确换图或独立复审。"""
     from video_learner.common.core import parse_time
     from video_learner.workflows.revision import revise
 
+    if review:
+        from video_learner.workflows.reviewing import review as review_notes
+
+        if block or instruction or frame or allow_ai_additions is not None:
+            raise InputError("--review 仅接受可选 --section，不与块修订、换图或补充指令合用")
+        reports = []
+        try:
+            with TerminalProgress(console, verbose) as progress:
+                path = review_notes(
+                    workdir,
+                    base=base,
+                    section=section,
+                    config_path=config,
+                    secret=secret,
+                    model_provider=provider,
+                    model=model,
+                    progress=progress,
+                    usage_report=reports.append,
+                )
+        finally:
+            for report in reports:
+                display_usage(report)
+        typer.echo(str(path / "notes.md"))
+        return
     with TerminalProgress(console, verbose) as progress:
         path = revise(
             workdir,

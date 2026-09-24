@@ -89,6 +89,7 @@ def convert(
     """编排单视频转换，在独占锁内提取证据、组织章节并提交新输出目录。
 
     输入与凭据预检通过后才创建工作目录；仅全部章节完成才登记 r001。
+    默认随后独立复审并返回 r002；复审失败保留 r001，费用计入同一次转换。
     force 在预检通过并持锁后删除原输出；后续转换失败不会恢复被删除的旧结果。
     失败保留诊断产物并抛异常，这些文件不代表可恢复任务或可修订的成功版本。
     """
@@ -303,6 +304,14 @@ def convert(
             staging.rename(target)
             if manifest["status"] != "completed":
                 raise TaskError(f"部分章节未完成，诊断和部分产物保存在 {target}")
+            if config.review_pass:
+                from video_learner.workflows.reviewing import review_version
+
+                events.path = contained(target, ".work/logs/events.jsonl")
+                try:
+                    return review_version(target, "r001", config, events, active_provider)
+                except (TaskError, InputError) as exc:
+                    raise TaskError(f"初稿 r001 已保存在 {target}，独立复审未完成：{exc}") from exc
             return target
         except BaseException as exc:
             if staging.exists():

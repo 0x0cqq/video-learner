@@ -87,6 +87,34 @@ class Draft(Record):
     review: list[str] = Field(max_length=100)
 
 
+class FrameAssessment(Record):
+    """复审每张候选的教学用途；时间邻近不直接视为语义相关。"""
+
+    frame_id: str
+    decision: Literal["use", "omit"]
+    related_block_id: str | None
+    transcript_ids: list[str]
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ReviewFinding(Record):
+    """针对已有块的证据判断与局部修改；report 只登记待核对事项。"""
+
+    target_id: str
+    kind: Literal["alignment", "missing_visual", "fidelity", "boundary", "repetition", "style"]
+    reason: str = Field(min_length=1, max_length=2000)
+    evidence_ids: list[str]
+    action: Literal["report", "replace", "insert_after"]
+    blocks: list[DraftBlock] = Field(max_length=20)
+
+
+class ReviewPass(Record):
+    """独立复审的完整结果；无需修改时 findings 为空，仍检查全部候选图片。"""
+
+    frames: list[FrameAssessment] = Field(max_length=30)
+    findings: list[ReviewFinding] = Field(max_length=100)
+
+
 class CompositionImage(Record):
     id: str
     path: str

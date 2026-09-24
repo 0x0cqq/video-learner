@@ -64,10 +64,13 @@ def evidence_packet(
     root: Path,
     current_markdown: str | None = None,
     target_ids: list[str] | None = None,
+    *,
+    packet_version: int = 2,
 ) -> tuple[dict, list[tuple[str, Path]]]:
     """组装目标范围的可引用证据及受控本地图片路径，供转换或局部修订使用。
 
     相邻十秒转写与上一章末尾仅帮助衔接，不可引用；图片超限时均匀取样，避免丢掉章尾。
+    新包明确上下文方向及帧所在的真实语音窗口；版本 1 仅供旧冻结输入离线重建。
     """
     context_start = max(book.start_us, chapter.start_us - 10 * US)
     context_end = min(book.end_us, chapter.end_us + 10 * US)
@@ -109,6 +112,25 @@ def evidence_packet(
         "current_markdown": current_markdown,
         "target_ids": target_ids,
     }
+    if packet_version >= 2:
+        packet["packet_version"] = packet_version
+        packet.pop("adjacent_context_not_citable")
+        packet["boundary_context_not_citable"] = {
+            "before": [
+                s.model_dump()
+                for s in book.transcript
+                if s.end_us <= chapter.start_us and s.end_us > context_start
+            ],
+            "after": [
+                s.model_dump()
+                for s in book.transcript
+                if s.start_us >= chapter.end_us and s.start_us < context_end
+            ],
+        }
+        for item in packet["frames"]:
+            item["speech_window_ids"] = [
+                s.id for s in segments if s.start_us <= item["at_us"] < s.end_us
+            ]
     return packet, [(f.id, contained(root, f.path)) for f in frames]
 
 
@@ -117,9 +139,11 @@ def composition_input(
     chapter: Chapter,
     config: Config,
     root: Path,
+    *,
+    packet_version: int = 2,
 ) -> tuple[CompositionInput, list[tuple[str, Path]]]:
     """冻结转换章节的证据包和图片身份，供调用及离线重放共用。"""
-    packet, images = evidence_packet(book, chapter, config, root)
+    packet, images = evidence_packet(book, chapter, config, root, packet_version=packet_version)
     return freeze_composition_input(packet, images, root), images
 
 
@@ -183,6 +207,10 @@ def validate_draft(draft: Draft, packet: dict) -> None:
         validate_body(block.body)
     if any(c in draft.title for c in "\r\n<>"):
         raise TaskError("模型章节标题包含无效结构")
+    if packet.get("packet_version", 1) >= 2:
+        from video_learner.notes.quality import validate_editorial_structure
+
+        validate_editorial_structure(draft, available)
 
 
 def apply_chapter_draft(

@@ -14,7 +14,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from video_learner.common.core import US, InputError, contained
-from video_learner.common.schemas import Draft, Notebook
+from video_learner.common.schemas import Draft, Notebook, ReviewPass
 from video_learner.common.storage import atomic_bytes, digest, read_json, write_json
 from video_learner.media.evidence import audio_window, sample_frames
 from video_learner.notes.composition import validate_notebook
@@ -41,12 +41,16 @@ def summarize_events(records: list[dict]) -> dict:
     """汇总首次转换，排除后续修订；嵌套事件不重复计入阶段总时长。"""
     stages, calls, failed, asr, audio = {}, {}, set(), [], []
     failures = Counter()
+    initial_run = records[0].get("run_id") if records else None
     for record in records:
         stage, status = record["stage"], record["status"]
+        if initial_run is not None and record.get("run_id") != initial_run:
+            break
         if stage.startswith("revise:"):
             break
         if status == "completed" and (
-            stage in ("prepare", "transcribe", "sample", "plan_chapters", "validate_export")
+            stage
+            in ("prepare", "transcribe", "sample", "plan_chapters", "validate_export", "review")
             or stage.startswith("compose:")
         ):
             stages[stage] = record["seconds"]
@@ -70,6 +74,7 @@ def summarize_events(records: list[dict]) -> dict:
         "plan_chapters": stages.get("plan_chapters", 0),
         "compose": sum(value for key, value in stages.items() if key.startswith("compose:")),
         "validate_export": stages.get("validate_export", 0),
+        "review": stages.get("review", 0),
     }
     return {
         "stage_seconds": groups,
@@ -106,7 +111,11 @@ def summarize_run(workdir: Path) -> dict:
             Draft.model_validate_json(raw)
             shapes["valid_structure"] += 1
         except ValidationError:
-            shapes["empty_array" if raw.strip() == "[]" else "other_invalid"] += 1
+            try:
+                ReviewPass.model_validate_json(raw)
+                shapes["valid_review_structure"] += 1
+            except ValidationError:
+                shapes["empty_array" if raw.strip() == "[]" else "other_invalid"] += 1
     result["raw_response_shapes_all_versions"] = dict(shapes)
     result["video_seconds"] = (manifest["range"][1] - manifest["range"][0]) / US
     result["model"] = manifest["config"]["model"]

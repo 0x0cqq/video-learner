@@ -34,5 +34,7 @@ qwen_enable_thinking = true
 qwen_thinking_budget = 1024
 max_output_tokens = 6000
 max_calls = 80
+# 初稿和独立复审共用上述请求上限；关闭后仅生成 r001。
+review_pass = true
 max_retries = 2
 request_timeout_seconds = 90

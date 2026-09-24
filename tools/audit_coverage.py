@@ -9,9 +9,15 @@ from video_learner.common.schemas import CompositionInput, Notebook
 from video_learner.common.storage import atomic_bytes, read_json, write_json
 
 
-def coverage_report(root: Path) -> dict:
+def coverage_report(root: Path, revision: str = "r001") -> dict:
     """按章节比较三层图片覆盖；缺少冻结输入时明确留空，不推测历史请求。"""
     book = Notebook.model_validate(read_json(root / "notes.json"))
+    record_id = None
+    if revision != "r001":
+        from video_learner.workflows.revision import load_baseline
+
+        manifest, _, book, _ = load_baseline(root, revision)
+        record_id = manifest["versions"][revision].get("review_record")
     frames = {frame.id: frame for frame in book.frames}
     chapters = []
     selected_times = set()
@@ -20,8 +26,14 @@ def coverage_report(root: Path) -> dict:
             frame.id for frame in book.frames if chapter.start_us <= frame.at_us < chapter.end_us
         ]
         frozen_path = contained(root, f".work/composition-inputs/{chapter.id}.json")
+        if revision != "r001":
+            frozen_path = (
+                contained(root, f".work/reviews/{record_id}/{chapter.id}.input.json")
+                if record_id
+                else None
+            )
         offered = None
-        if frozen_path.is_file():
+        if frozen_path is not None and frozen_path.is_file():
             frozen = CompositionInput.model_validate(read_json(frozen_path))
             offered = [image.id for image in frozen.images]
         selected = [block.frame_id for block in chapter.blocks if block.kind == "figure"]
@@ -52,6 +64,7 @@ def coverage_report(root: Path) -> dict:
         reverse=True,
     )
     return {
+        "revision": revision,
         "range_us": [book.start_us, book.end_us],
         "candidate_count": len(book.frames),
         "figure_count": sum(len(chapter["selected_ids"]) for chapter in chapters),
@@ -98,6 +111,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("workdir", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--revision", default="r001", help="显式版本，复审版读取其实际复审送图记录")
     args = parser.parse_args()
     root = args.workdir.resolve()
     target = output_path(root, args.output)
@@ -107,7 +121,7 @@ def main() -> None:
         source_root = source if source.is_dir() else source.parent
         if target.is_relative_to(source_root) or source_root.is_relative_to(target):
             raise InputError("报告目录不能与源素材目录重叠")
-    report = coverage_report(root)
+    report = coverage_report(root, args.revision)
     target.mkdir(parents=True, exist_ok=False)
     write_json(target / "coverage.json", report)
     atomic_bytes(target / "coverage.md", render_report(report).encode("utf-8"))

@@ -19,6 +19,7 @@ STAGES = {
     "compose": "图文整理",
     "validate_export": "校验与导出",
     "revise": "修订",
+    "review": "独立复审",
 }
 
 
@@ -98,7 +99,7 @@ class TerminalProgress:
         )
         self.stage = ""
         self.started = time.monotonic()
-        self.requests = {"transcribe": RequestMetrics(), "compose": RequestMetrics()}
+        self.requests = {name: RequestMetrics() for name in ("transcribe", "compose", "review")}
         self.planned: dict[str, int] = {}
         self.pause_cuts = 0
         self.audio_chunks = 0
@@ -170,7 +171,7 @@ class TerminalProgress:
                     count = f"{completed}/{total}"
                 if record.get("failed"):
                     count += f" · 失败 {record['failed']} 章"
-                if stage == "compose":
+                if stage in ("compose", "review"):
                     self.planned[stage] = total
                 elif "request_total" in record:
                     self.planned[stage] = record["request_total"]
@@ -212,7 +213,13 @@ class TerminalProgress:
             "model_usage",
             "model_validation",
         ):
-            group = "transcribe" if stage.startswith("asr_") else "compose"
+            group = (
+                "transcribe"
+                if stage.startswith("asr_")
+                else "review"
+                if self.stage == "review"
+                else "compose"
+            )
             self.requests[group].observe(record)
         group = "compose" if self.stage == "revise" else self.stage
         if group in self.requests:
