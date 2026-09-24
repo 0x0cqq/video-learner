@@ -75,7 +75,7 @@ ASR 通过 `jobs` 控制有界请求并发，默认 1；切片生成和响应保
 
 DeepSeek 使用 Responses API 图像输入和 JSON schema 响应。Qwen 使用 Chat Completions，固定连接 `https://dashscope.aliyuncs.com/compatible-mode/v1`，默认 `qwen3.8-flash`；图片以 Base64 `image_url` 发送，schema 同时写入请求格式和系统提示。两者均执行 Pydantic 及跨字段校验。text 块的 frame_id 必须为 null；figure 块必须引用本次提供的 frame ID 并将其包含在证据列表中。同章不重复导出同一截图。模型不能控制本地路径、HTML 锚点或来源时间戳。[DeepSeek Responses API](https://api-docs.deepseek.com/api/create-response/)
 
-DeepSeek 默认 `reasoning_effort = "none"`，单次最多 6000 输出 token，任务最多 80 次实际请求、最多 2 次重试，均可在 TOML 调整。SDK 内置重试关闭。输出截断直接失败；临时网络错误及结构/引用错误有界重试；认证和请求配置错误直接报告。日志记录服务返回的输入/输出 token 和耗时；超时请求仍可能计费。[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)
+DeepSeek 默认 `reasoning_effort = "none"`，单次最多 6000 输出 token，任务最多 120 次实际请求、最多 2 次重试，均可在 TOML 调整。SDK 内置重试关闭。输出截断直接失败；临时网络错误及结构/引用错误有界重试；认证和请求配置错误直接报告。日志记录服务返回的输入/输出 token 和耗时；超时请求仍可能计费。[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)
 
 DeepSeek 转换默认逐轮追加已成功的原始请求（含图片）与回答，完整保留前缀；修订和 Qwen 保持独立请求。历史只用于术语和承接，引用校验仍仅允许当前包的证据。默认保守上下文预算 200K token、请求体预算 40 MiB，含输出及修复预留；到达边界整组重置，依靠包内上章末尾继续衔接。`deepseek_context=chapter` 可关闭历史。模型用量保留实际缓存 token；估计量只用于边界控制。
 
@@ -87,17 +87,25 @@ Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 tok
 
 编程保留目标、修改、错误、修复和运行结果；数学保留原课中存在的假设、符号、关键推导、结论和条件；混合内容按实际材料组织，不强行填模板。内容分为原课整理、显式要求的 AI 补充解释和待核对。模糊公式、代码和未交代条件进入疑点清单。
 
-正文直接讲解课程内容，不逐图描述或堆放转写。图注允许为空，文字块必须非空；图意自明或已由正文解释时省略图注，不强求每章配图。提示词版本为 p0-7。原课类别、块 ID、来源区间、证据列表和手改同步状态放入 `sources.md`；`review.md` 列出内容疑点并以单条提示标明手改状态。正文仅显式标记 AI 补充和待核对，保留隐藏修订锚点。标题中的行内 LaTeX 保留原命令，标题其余 Markdown 控制字符转义。
+正文直接讲解课程内容，不逐图描述或堆放转写。图注允许为空，文字块必须非空；图意自明或已由正文解释时省略图注，不强求每章配图。提示词版本为 p0-8。原课类别、块 ID、来源区间、证据列表和手改同步状态放入 `sources.md`；`review.md` 列出内容疑点并以单条提示标明手改状态。正文仅显式标记 AI 补充和待核对，保留隐藏修订锚点。标题中的行内 LaTeX 保留原命令，标题其余 Markdown 控制字符转义。
 
 证据包版本 2 用 `boundary_context_not_citable.before/after` 区分边界方向，每张帧的 `speech_window_ids` 指向其实际所在音频窗口。这个关系只表示时间邻近，不表示语义匹配，也不创造句级时间戳。正文确定性检查拒绝当前证据 ID 泄漏和章节末尾空标题，保留代码围栏中的字面示例；旧冻结包按原契约离线重建。
 
 ### 独立模型复审
 
-`review_pass=true` 默认在 r001 提交后复审全部章节；`revise --review` 对显式成功基线复审整篇或指定章。复审逐章使用同一份冻结基线、实际 Markdown、原始转写、候选图及相邻章节首尾，不继承模型生成会话，也不让已修改章节改变后续复审输入。已有引用图片优先送入，剩余额度均匀补候选，图片预算与原提取配置一致。
+`review_pass=true` 默认在 r001 提交后执行 `review_steps`，顺序为 `visual`（图文对应）和 `content`（讲义内容）。`revise --review` 对显式成功基线复审整篇或指定章。每轮的各章读取该轮开始时的固定讲义快照，下一轮读取上一轮完成的讲义；原始证据保持不变。请求包含实际 Markdown、原始转写、候选图及相邻章节首尾，模型不继承生成或前轮的会话历史。已有引用图片优先送入，剩余额度均匀补候选，图片预算与原提取配置一致。
 
-`ReviewPass` 包含全部候选的 `FrameAssessment` 和局部 `ReviewFinding`。逐图判断给出采用/省略、原块落点、语音引用与理由；落点是文字块时放在解释后，是已有图片块时沿用原图位置。本地代码应用该决定，省略未选图，新增图默认无图注。文字修改、已有图注纠正和实质疑点分别记录为替换、插入或报告；证据和目标必须属于本次范围，落点仍须保留，同一块最多一次修改。基于稳定块 ID 比较新旧序列，仅拼接变化范围，保留其他字节；移动原图时保留手改图注。选图理由留在工作记录与 changes.md，未解决的疑点进入 review.md。模型复审仍需人工抽查事实和读图。
+`ReviewStep` 包含唯一名称、职能、用户 `instruction` 和 `mode=apply|report`，配置列表整体替换默认列表。图文轮允许选图、移动图片及纠正已有图注；内容轮仅修改文字，仍可读图核对正文。报告模式只增加疑点。职能边界在本地校验，自定义规则仍受证据和写入范围约束；配置方法见[使用指南](usage.md#独立复审)。
 
-复审沿用目录锁、源指纹、并发编辑检查、版本独立导出和原子提交。初稿与复审共用 `max_calls` 预算，关闭复审只产生 r001。复审失败时保留成功初稿并报告失败，失败复审不登记新版本。输入、结果及基线存于 `.work/reviews/<记录ID>/`，清单关联 `review_record`；`replay_revision()` 重建逐章输入、图片身份及最终讲义。单独复审的用量按运行保存并复制到成功版本，转换中的复审计入根目录总用量。
+单轮函数接口为 `(packet, images) -> ReviewResult`，默认调用 `Provider.review`；嵌入 Python 时可向 `workflows.reviewing.review(..., reviewers={"content": check_content})` 注入同接口函数，按步骤名称覆盖。未知名称在执行前报错；未覆盖的步骤沿用模型。`notes/review_prompts.py` 组织职能提示词，供应商仅负责请求和有界修复。流程直接顺序迭代配置列表。
+
+`ReviewResult` 包含可选逐图决定 `frames`、局部 `findings` 和 `resolved_review_ids`。`frames=null` 保留全部图片；图文应用轮须完整评估候选，采用图的落点为文字块时放在其后，为已有图片块时沿用原位置。新增图默认无图注。文字替换/插入只作用于目标块，证据必须属于本次范围；图文轮的图注替换保持同一 frame_id。`apply_review_pass()` 是纯函数，返回新 Notebook 和 Markdown，输入对象不变；按稳定块 ID 只拼接变化范围，移动原图保留手改图注与其他非目标字节。新增块 ID 包含步骤名，连续插入不会互相覆盖。
+
+本轮 `current_review` 为疑点分配局部编号；明确列在 `resolved_review_ids` 的项才移除，其余保留。目标块被删时未解决疑点转挂到章节；新增 report 进入 review.md，选图理由仅留在工作记录与 changes.md。模型复审仍需人工核对事实和读图。
+
+正文的确定性文体检查由内容应用轮执行；图文轮仅检查本轮改写图注的文体，只报告轮保留原文。这样旧正文的编号泄漏等问题可以留到内容轮处理，图文轮仍须满足所有证据和结构约束。
+
+复审沿用目录锁、源指纹、并发编辑检查和独立版本导出。整条流程全部成功后提交一个版本；任一轮失败保留基线，失败复审不登记新版本。初稿与各轮共用 `max_calls`，默认上限 120；未重试时默认每章为初稿一次、复审两次。输入和结果按步骤保存在 `.work/reviews/<记录ID>/<步骤名>/`，根部保存运行配置和原基线，清单关联 `review_record` 与有序步骤名。`replay_revision()` 按原顺序重建各轮输入及最终讲义，也能核对既有单轮记录。单独复审的用量按运行保存并复制到成功版本，转换中的复审计入根目录总用量。
 
 课程文字、字幕、代码和命令均为数据；供应商没有可执行工具，素材不能授权执行程序、读取任意路径或修改规则。请求和产物不含真实密钥或签名下载 URL。机械校验只保证结构、证据边界及资源关系；事实支持、公式正确和步骤覆盖属于独立内容评估。
 
@@ -115,7 +123,7 @@ Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 tok
 
 ## 5. 数据与独立版本
 
-持久化数据的 Pydantic 对象为 Source、Track、TranscriptSegment、FrameEvidence、CompositionInput、Draft、ReviewPass、FrameAssessment、ReviewFinding、Chapter、NoteBlock、ReviewItem、Notebook。根目录初稿为 r001，修订放入 revisions/r002/ 等，清单保存父版本和内容哈希。
+持久化数据的 Pydantic 对象为 Source、Track、TranscriptSegment、FrameEvidence、CompositionInput、Draft、ReviewResult、FrameAssessment、ReviewFinding、Chapter、NoteBlock、ReviewItem、Notebook。根目录初稿为 r001，修订放入 revisions/r002/ 等，清单保存父版本和内容哈希。
 
 ```text
 output/sample/

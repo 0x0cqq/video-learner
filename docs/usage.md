@@ -40,7 +40,7 @@ uv run video-learner convert "D:\media\programming" --start 00:45:00 --end 00:55
 
 生成的根目录对应 r001：`notes.md`、`assets/`、`sources.md`、`review.md`、`source.json`、`transcript.jsonl`、`notes.json`、`usage.json`。正文保留连贯解释与必要图片，图注可省略；来源区间、证据、修订 ID 和手改同步状态集中在 `sources.md`，具体内容疑点列在 `review.md`。`.work/` 保存本机来源、指纹、原帧、音频窗口、生成快照、版本清单与日志。
 
-转换默认在初稿 r001 完成后执行独立复审，输出 `revisions/r002/notes.md`，终端最后返回该路径。复审逐张核对候选图与正文，检查跨章承接、事实和讲义文体；具体改动见新版本的 `changes.md`。初稿与原始证据保留。`--no-review` 或 TOML `review_pass=false` 只生成初稿；`max_calls` 是初稿与复审共用的图文调用上限，复审增加请求和费用。复审失败时初稿仍可阅读，命令报告失败并保留诊断。
+转换默认在初稿 r001 完成后执行独立复审，输出 `revisions/r002/notes.md`，终端最后返回该路径。复审先检查选图、位置和图注，再检查正文保真、跨章承接和讲义文体；具体改动见新版本的 `changes.md`。初稿与原始证据保留。`--no-review` 或 TOML `review_pass=false` 只生成初稿；`max_calls` 是初稿与复审共用的图文调用上限，复审增加请求和费用。复审失败时初稿仍可阅读，命令报告失败并保留诊断。
 
 ## 云端语音识别
 
@@ -102,7 +102,30 @@ uv run video-learner revise ".\output\sample" --base r001 --review --section ch-
 uv run video-learner revise ".\output\sample" --base r002 --review --secret ".\secrets\deepseek.secret"
 ```
 
-`--review` 与 `--block`、`--frame`、`--instruction`、AI 补充选项分开使用。支持 `--provider`、`--model` 和 `--config`。每章独立接收同一基线下的当前文稿、原始证据及前后文，只替换明确指出的问题块，保留其余字节和旧版本；实际读图仍可能出错，结构通过不代表内容已全部核实。复审意见及逐图理由保存在 `.work/reviews/`，正文只保留讲义，未解决的内容疑点列在新版 `review.md`。单独复审的用量写入新版 `usage.json`，失败时保存在 `.work/review-usage/`。
+`--review` 与 `--block`、`--frame`、`--instruction`、AI 补充选项分开使用。支持 `--provider`、`--model` 和 `--config`。每轮各章接收该轮开始时的当前文稿、原始证据及前后文，后轮读取前轮结果，只替换明确指出的问题块，保留其余字节和旧版本；实际读图仍可能出错，结构通过不代表内容已全部核实。复审意见及逐图理由保存在 `.work/reviews/`，正文只保留讲义，未解决的内容疑点列在新版 `review.md`。单独复审的用量写入新版 `usage.json`，失败时保存在 `.work/review-usage/`。
+
+复审按职能配置，默认顺序为图文 `visual`、内容 `content`。下面的 TOML 保留两轮并自定义检查重点；用 `--config review.toml` 传入，适用于 convert 和 revise --review：
+
+```toml
+[[review_steps]]
+name = "visual"
+kind = "visual"
+instruction = "重点保留架构关系和代码变化的中间状态。"
+
+[[review_steps]]
+name = "content"
+kind = "content"
+instruction = """
+核对术语、前提和推理步骤，压缩重复叙述。
+正文不保留转写窗口、生成过程等说明。
+"""
+```
+
+`review_steps` 整体替换默认列表，省略某一步即不执行。名称须以小写字母开头，仅含小写字母、数字、下划线或连字符，最长 40 字符且不重复，避开 Windows 保留名称（如 `con`）；列表顺序就是执行顺序。同一职能可用不同名称重复配置，例如添加 `name="wording"`、`kind="content"` 专门检查文体。`instruction` 直接支持 TOML 多行文本，无需新增代码。
+
+每步可设 `mode="report"`，只将具体问题加入 `review.md`，保留正文、图片和已有疑点；默认 `mode="apply"`。图文轮可以增删移动候选图、修改图注，内容轮保留配图并修改正文；内容轮发现图注问题时报告。未被明确解决的疑点会跨轮保留，最终只生成一个复审版本。默认每章增加两次模型调用，初稿与所有复审轮共享 `max_calls`（默认 120，旧基线或显式配置仍沿用原上限）。
+
+Python 自定义函数可按步骤名称注入，接口及状态约束见[技术设计](technical-design.md#独立模型复审)。
 
 ## 修订文字
 
@@ -169,7 +192,7 @@ uv run video-learner convert "D:\media\lesson.mp4" --provider qwen --config conf
 
 请求统计显示已发出数、已结束数、累计重试和均耗时；重试累计显示，章节失败单独提示。结束后显示各阶段请求汇总、结果、总耗时及转换用量。加 `--verbose` 可打印详细阶段事件；输出重定向时默认仅打印阶段摘要，不输出动态控制字符。完整事件始终写入工作目录 `.work/logs/events.jsonl`，不需要额外开启日志；终端进度不通过轮询日志计算。
 
-ASR 请求总量先按窗口上限估算，随后按已完成片段的平均时长动态更新；图文整理和独立复审的基础请求数分别按章节数计算。预计总请求包含已实际发出的重试，待发数量不含当前进行中的请求，也不预测未来重试。均耗时按有计时数据的已结束请求计算，包括失败请求；同一响应后续的校验或完成事件不重复计时。统计分别覆盖 ASR、图文整理和复审。
+ASR 请求总量先按窗口上限估算，随后按已完成片段的平均时长动态更新；图文整理的基础请求数按章节数计算，独立复审按章节数乘配置步骤数计算。预计总请求包含已实际发出的重试，待发数量不含当前进行中的请求，也不预测未来重试。均耗时按有计时数据的已结束请求计算，包括失败请求；同一响应后续的校验或完成事件不重复计时。统计分别覆盖 ASR、图文整理和复审。
 
 阶段结束显示耗时：语音识别列出实际音频片数（含无文字切片）、请求数及重试数；截图列出扫描帧数与候选图数；图文列出成功章节数、插图数、请求数及重试数，部分失败单独标明。使用外部字幕时标注“外部字幕”，不显示音频片数。请求数包含重试，插图数按正文图片块统计。
 

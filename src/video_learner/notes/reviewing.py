@@ -1,9 +1,10 @@
 """构造独立复审输入，并按明确块目标应用证据约束下的局部修改。"""
 
+from collections.abc import Callable
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from video_learner.common.config import Config
+from video_learner.common.config import Config, ReviewStep
 from video_learner.common.core import TaskError, contained
 from video_learner.common.schemas import (
     Chapter,
@@ -13,7 +14,7 @@ from video_learner.common.schemas import (
     NoteBlock,
     Notebook,
     ReviewItem,
-    ReviewPass,
+    ReviewResult,
 )
 from video_learner.notes.composition import (
     chapter_review,
@@ -21,7 +22,10 @@ from video_learner.notes.composition import (
     freeze_composition_input,
     validate_draft,
 )
+from video_learner.notes.quality import validate_editorial_structure
 from video_learner.notes.rendering import expected_spans, render_block
+
+type ReviewFunction = Callable[[dict, list[tuple[str, Path]]], ReviewResult]
 
 
 def review_input(
@@ -31,6 +35,7 @@ def review_input(
     root: Path,
     current: bytes,
     revision_id: str,
+    step: ReviewStep | None = None,
 ) -> tuple[CompositionInput, list[tuple[str, Path]]]:
     """结合实际 Markdown、前后章节与原始证据构造独立复审，不改写手改基线。
 
@@ -84,24 +89,71 @@ def review_input(
             None,
         ),
     )
+    if step is not None:
+        packet["review_step"] = step.model_dump()
+        packet["current_review"] = [
+            {"id": index, **item} for index, item in enumerate(packet["current_review"])
+        ]
     images = [(frame.id, contained(root, frame.path)) for frame in frames]
     return freeze_composition_input(packet, images, root), images
 
 
-def reviewed_chapter(result: ReviewPass, packet: dict) -> Chapter:
+def validate_review_scope(result: ReviewResult, packet: dict) -> None:
+    """限制每轮的写入职能，显式解决疑点；旧记录仍按原单轮契约重放。"""
+    if "review_step" not in packet:
+        return
+    step = ReviewStep.model_validate(packet["review_step"])
+    known = {item["id"] for item in packet["current_review"]}
+    resolved = result.resolved_review_ids
+    if len(set(resolved)) != len(resolved) or not set(resolved) <= known:
+        raise TaskError("已解决疑点必须引用本轮 current_review 的有效且不重复的 id")
+    edits = [item for item in result.findings if item.action != "report"]
+    if step.mode == "report":
+        if result.frames is not None or edits or resolved:
+            raise TaskError("只报告模式须 frames=null，仅返回 report，不解决或修改已有内容")
+        return
+    if step.kind == "content" and result.frames is not None:
+        raise TaskError("内容复审须 frames=null，保留现有配图")
+    if step.kind == "visual" and result.frames is None:
+        raise TaskError("图文复审须评估全部候选图")
+    blocks = {item["id"]: item for item in packet["chapter"]["blocks"]}
+    for edit in edits:
+        target = blocks.get(edit.target_id)
+        if target is None:
+            raise TaskError("复审修改指向不存在的块")
+        if step.kind == "content":
+            if target["kind"] != "text" or any(b.kind != "text" for b in edit.blocks):
+                raise TaskError("内容复审只能修改文字块，图片或图注问题应报告")
+        elif (
+            target["kind"] != "figure"
+            or edit.action != "replace"
+            or len(edit.blocks) != 1
+            or edit.blocks[0].kind != "figure"
+            or edit.blocks[0].frame_id != target["frame_id"]
+        ):
+            raise TaskError("图文复审的 findings 只能替换同一图片的图注，正文问题应报告")
+
+
+def reviewed_chapter(result: ReviewResult, packet: dict) -> Chapter:
     """校验复审的范围、引用和逐图决策，确定性地生成修改后的章节。
 
     修改仅作用于明确的原块，不能利用复审新增无证据事实、重复图片或越界目标。
     """
+    validate_review_scope(result, packet)
     chapter = Chapter.model_validate(packet["chapter"])
+    edit_id = packet["revision_id"]
+    if "review_step" in packet:
+        edit_id += "-" + packet["review_step"]["name"]
     blocks = {block.id: block for block in chapter.blocks}
     transcript_ids = {item["id"] for item in packet["transcript"]}
     frame_ids = {item["id"] for item in packet["frames"]}
     available = transcript_ids | frame_ids
-    assessed = [item.frame_id for item in result.frames]
-    if len(set(assessed)) != len(assessed) or set(assessed) != frame_ids:
+    assessed = [item.frame_id for item in result.frames or []]
+    if result.frames is not None and (
+        len(set(assessed)) != len(assessed) or set(assessed) != frame_ids
+    ):
         raise TaskError("复审必须逐张评估本次全部候选图，不能遗漏、重复或新增图片 ID")
-    for item in result.frames:
+    for item in result.frames or []:
         if not set(item.transcript_ids) <= transcript_ids:
             raise TaskError("图片语义对应引用了本次范围之外的语音 ID")
         if item.related_block_id is not None and item.related_block_id not in blocks:
@@ -136,15 +188,53 @@ def reviewed_chapter(result: ReviewPass, packet: dict) -> Chapter:
             identity = (
                 block.id
                 if finding.action == "replace" and position == 1 and replacement.kind == block.kind
-                else f"{prefix}-{chapter.id[3:]}-{packet['revision_id']}-{index:03d}-{position:02d}"
+                else f"{prefix}-{chapter.id[3:]}-{edit_id}-{index:03d}-{position:02d}"
             )
             updated.append(
                 NoteBlock(**replacement.model_dump(), id=identity, chapter_id=chapter.id)
             )
     if not updated:
         raise TaskError("复审不能删除整章全部内容")
-    # 逐图决定是配图的唯一来源，位置和新图块由本地代码生成。
-    selected = [item for item in result.frames if item.decision == "use"]
+    chapter.blocks = (
+        position_figures(updated, result, chapter.id, edit_id)
+        if result.frames is not None
+        else updated
+    )
+    step = packet.get("review_step")
+    validate_draft(
+        Draft(
+            title=chapter.title,
+            blocks=[
+                DraftBlock(
+                    **{
+                        **block.model_dump(include=set(DraftBlock.model_fields)),
+                        # 手改块沿用当前 Markdown；旧索引的文体不能冒充用户当前正文。
+                        **(
+                            {"body": "保留用户手改内容。"}
+                            if block.sync_status == "manual_unverified"
+                            else {}
+                        ),
+                    }
+                )
+                for block in chapter.blocks
+            ],
+            review=[],
+        ),
+        packet,
+        check_editorial=step is None or (step["kind"] == "content" and step["mode"] == "apply"),
+    )
+    if step and step["kind"] == "visual" and edits:
+        # 图文轮只校验本轮改写的图注，原正文的文体缺陷交给内容轮。
+        captions = [block for _, finding in edits.values() for block in finding.blocks]
+        validate_editorial_structure(Draft(title="图注", blocks=captions, review=[]), available)
+    return chapter
+
+
+def position_figures(
+    updated: list[NoteBlock], result: ReviewResult, chapter_id: str, edit_id: str
+) -> list[NoteBlock]:
+    """按完整逐图决定增删和排列图片；复用已有图块及图注。"""
+    selected = [item for item in result.frames or [] if item.decision == "use"]
     available_figures = {block.frame_id: block for block in updated if block.kind == "figure"}
     # 文字块表示放在解释后；原图片块表示沿用该位置，不猜测它与相邻段落的关系。
     remaining = {block.id for block in updated}
@@ -163,8 +253,8 @@ def reviewed_chapter(result: ReviewPass, packet: dict) -> Chapter:
         figure = available_figures.get(assessment.frame_id)
         if figure is None:
             figure = NoteBlock(
-                id=f"fig-{chapter.id[3:]}-{packet['revision_id']}-image-{index:02d}",
-                chapter_id=chapter.id,
+                id=f"fig-{chapter_id[3:]}-{edit_id}-image-{index:02d}",
+                chapter_id=chapter_id,
                 kind="figure",
                 body="",
                 category="original",
@@ -179,37 +269,18 @@ def reviewed_chapter(result: ReviewPass, packet: dict) -> Chapter:
         ordered.extend(figures_after.get(block.id, []))
     if not ordered:
         raise TaskError("复审不能删除整章全部内容")
-    chapter.blocks = ordered
-    validate_draft(
-        Draft(
-            title=chapter.title,
-            blocks=[
-                DraftBlock(
-                    **{
-                        **block.model_dump(include=set(DraftBlock.model_fields)),
-                        # 手改块沿用当前 Markdown；旧索引的文体不能冒充用户当前正文。
-                        **(
-                            {"body": "保留用户手改内容。"}
-                            if block.sync_status == "manual_unverified"
-                            else {}
-                        ),
-                    }
-                )
-                for block in ordered
-            ],
-            review=[],
-        ),
-        packet,
-    )
-    return chapter
+    return ordered
 
 
-def apply_review_pass(book: Notebook, packet: dict, result: ReviewPass, current: bytes) -> bytes:
-    """按块替换 Markdown，保留所有非目标字节，并重建本章的内容疑点。
+def apply_review_pass(
+    book: Notebook, packet: dict, result: ReviewResult, current: bytes
+) -> tuple[Notebook, bytes]:
+    """纯函数：返回修改后的讲义与 Markdown，保留非目标字节和未解决疑点。
 
-    packet 来自复审前冻结基线；章节之间的复审输入不受已采用修改影响。
+    输入对象保持不变；packet 来自本轮冻结基线，调用方负责顺序执行和保存。
     """
     chapter = reviewed_chapter(result, packet)
+    book = book.model_copy(deep=True)
     original = next(item for item in book.chapters if item.id == chapter.id)
     spans = expected_spans(current, book)
     changes = []
@@ -244,12 +315,23 @@ def apply_review_pass(book: Notebook, packet: dict, result: ReviewPass, current:
         current = current[:start] + replacement + current[end:]
     targets = {original.id, *(block.id for block in original.blocks)}
     book.chapters[book.chapters.index(original)] = chapter
-    book.review = [item for item in book.review if item.block_id not in targets]
-    book.review.extend(chapter_review(chapter, []))
     remaining_ids = {block.id for block in chapter.blocks}
+    if "review_step" not in packet:
+        book.review = [item for item in book.review if item.block_id not in targets]
+    else:
+        resolved = [
+            ReviewItem.model_validate({k: v for k, v in item.items() if k != "id"})
+            for item in packet["current_review"]
+            if item["id"] in result.resolved_review_ids
+        ]
+        book.review = [item for item in book.review if item not in resolved]
+        for item in book.review:
+            if item.block_id in targets and item.block_id not in remaining_ids:
+                item.block_id = chapter.id
+    additions = chapter_review(chapter, [])
     for finding in result.findings:
         if finding.action == "report":
-            book.review.append(
+            additions.append(
                 ReviewItem(
                     reason=finding.reason,
                     start_us=chapter.start_us,
@@ -260,5 +342,8 @@ def apply_review_pass(book: Notebook, packet: dict, result: ReviewPass, current:
                     evidence_ids=finding.evidence_ids,
                 )
             )
+    for item in additions:
+        if item not in book.review:
+            book.review.append(item)
     expected_spans(current, book)
-    return current
+    return book, current

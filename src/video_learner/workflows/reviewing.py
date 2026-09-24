@@ -26,7 +26,7 @@ from video_learner.notes.rendering import (
     image_dependencies,
     local_image,
 )
-from video_learner.notes.reviewing import apply_review_pass, review_input
+from video_learner.notes.reviewing import ReviewFunction, apply_review_pass, review_input
 from video_learner.providers.base import PROMPT_VERSION, Provider, create_provider
 from video_learner.workflows.conversion import extraction_hash, fingerprint_source
 from video_learner.workflows.revision import baseline_config, conflict_report, load_baseline
@@ -42,6 +42,7 @@ def review(
     model_provider: str | None = None,
     model: str | None = None,
     provider: Provider | None = None,
+    reviewers: dict[str, ReviewFunction] | None = None,
     progress: Callable[[dict], None] | None = None,
     usage_report: Callable[[dict], None] | None = None,
 ) -> Path:
@@ -60,7 +61,7 @@ def review(
         )
         events = Events(root, progress)
         try:
-            destination = review_version(root, base, config, events, provider, section)
+            destination = review_version(root, base, config, events, provider, section, reviewers)
         finally:
             report = summarize_usage(events.usage_events, config)
             write_json(contained(root, f".work/review-usage/{events.run_id}.json"), report)
@@ -77,6 +78,7 @@ def review_version(
     events: Events,
     provider: Provider | None = None,
     section: str | None = None,
+    reviewers: dict[str, ReviewFunction] | None = None,
 ) -> Path:
     """在调用方持锁时核验基线、冻结独立复审输入，提交新版本；失败保留原版本。"""
     manifest, baseline, book, snapshot = load_baseline(root, base)
@@ -96,6 +98,9 @@ def review_version(
     chapters = [c for c in book.chapters if section is None or c.id == section]
     if not chapters:
         raise InputError("指定章节不存在")
+    reviewers = reviewers or {}
+    if set(reviewers) - {step.name for step in config.review_steps}:
+        raise InputError("自定义复审函数名称须在 review_steps 中配置")
     for reference in image_dependencies(current):
         if not contained(baseline, local_image(reference)).is_file():
             raise InputError("基线文档中的图片依赖缺失")
@@ -127,38 +132,59 @@ def review_version(
     record = contained(root, f".work/reviews/{record_id}")
     staging = contained(root, f".work/revision-{uuid.uuid4().hex}.partial")
     staging.mkdir(parents=True, exist_ok=False)
-    frozen_book = book.model_copy(deep=True)
-    frozen_current = current
     atomic_bytes(record / "baseline.md", current)
     write_json(record / "baseline.json", book.model_dump())
     write_json(
         record / "config.json", config.model_dump(exclude={"secret_file", "asr_secret_file"})
     )
     changes = [f"# {revision_id} 复审修改\n\n基线：{base}\n"]
-    active_provider = provider or create_provider(config, events)
+    active_provider = provider
     try:
         with events.stage("review"):
-            for index, chapter in enumerate(chapters):
-                events.emit(
-                    "review", "progress", total=len(chapters), completed=index, detail=chapter.id
-                )
-                frozen, images = review_input(
-                    frozen_book, chapter, config, root, frozen_current, revision_id
-                )
-                write_json(record / f"{chapter.id}.input.json", frozen.model_dump())
-                result = active_provider.review(frozen.packet, images)
-                write_json(record / f"{chapter.id}.result.json", result.model_dump())
-                current = apply_review_pass(book, frozen.packet, result, current)
-                changes.extend(
-                    f"- {chapter.id} / {item.target_id} / {item.action}：{item.reason}\n"
-                    for item in result.findings
-                )
-                changes.extend(
-                    f"- {chapter.id} / {item.frame_id} / {item.decision}"
-                    f"（关联 {item.related_block_id or '无'}）：{item.reason}\n"
-                    for item in result.frames
-                )
-            events.emit("review", "progress", total=len(chapters), completed=len(chapters))
+            total = len(chapters) * len(config.review_steps)
+            completed = 0
+            for step in config.review_steps:
+                # 同一轮各章使用固定快照；下一轮统一读取本轮的完整结果。
+                frozen_book, frozen_current = book.model_copy(deep=True), current
+                reviewer = reviewers.get(step.name)
+                if reviewer is None:
+                    active_provider = active_provider or create_provider(config, events)
+                    reviewer = active_provider.review
+                changes.append(f"\n## {step.name}（{step.kind} / {step.mode}）\n")
+                for target in chapters:
+                    chapter = next(c for c in frozen_book.chapters if c.id == target.id)
+                    events.emit(
+                        "review",
+                        "progress",
+                        total=total,
+                        completed=completed,
+                        detail=f"{step.name} / {chapter.id}",
+                    )
+                    frozen, images = review_input(
+                        frozen_book, chapter, config, root, frozen_current, revision_id, step
+                    )
+                    write_json(record / step.name / f"{chapter.id}.input.json", frozen.model_dump())
+                    # 自定义函数也只拿独立输入；应用和重放始终使用未改写的冻结包。
+                    result = reviewer(frozen.model_copy(deep=True).packet, images)
+                    book, current = apply_review_pass(book, frozen.packet, result, current)
+                    write_json(
+                        record / step.name / f"{chapter.id}.result.json", result.model_dump()
+                    )
+                    changes.extend(
+                        f"- {chapter.id} / {item.target_id} / {item.action}：{item.reason}\n"
+                        for item in result.findings
+                    )
+                    changes.extend(
+                        f"- {chapter.id} / {item.frame_id} / {item.decision}"
+                        f"（关联 {item.related_block_id or '无'}）：{item.reason}\n"
+                        for item in result.frames or []
+                    )
+                    changes.extend(
+                        f"- {chapter.id} / 已解决疑点 {identity}\n"
+                        for identity in result.resolved_review_ids
+                    )
+                    completed += 1
+            events.emit("review", "progress", total=total, completed=completed)
             validate_notebook(book, root)
             export_book(book, root, staging, current, base=baseline)
             atomic_bytes(staging / "changes.md", "\n".join(changes).encode("utf-8"))
@@ -179,6 +205,7 @@ def review_version(
                 "base_current_hash": current_hash,
                 "review_record": record_id,
                 "review_sections": [c.id for c in chapters],
+                "review_steps": [step.name for step in config.review_steps],
                 "prompt_version": PROMPT_VERSION,
             }
             write_json(contained(root, ".work/manifest.json"), manifest)

@@ -14,7 +14,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from video_learner.common.core import US, InputError, contained
-from video_learner.common.schemas import Draft, Notebook, ReviewPass
+from video_learner.common.schemas import Draft, Notebook, ReviewResult
 from video_learner.common.storage import atomic_bytes, digest, read_json, write_json
 from video_learner.media.evidence import audio_window, sample_frames
 from video_learner.notes.composition import validate_notebook
@@ -112,7 +112,7 @@ def summarize_run(workdir: Path) -> dict:
             shapes["valid_structure"] += 1
         except ValidationError:
             try:
-                ReviewPass.model_validate_json(raw)
+                ReviewResult.model_validate_json(raw)
                 shapes["valid_review_structure"] += 1
             except ValidationError:
                 shapes["empty_array" if raw.strip() == "[]" else "other_invalid"] += 1

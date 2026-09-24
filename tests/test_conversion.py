@@ -5,7 +5,7 @@ import pytest
 
 from video_learner.common.config import Config
 from video_learner.common.core import InputError, TaskError
-from video_learner.common.schemas import Draft, DraftBlock, FrameAssessment, Notebook, ReviewPass
+from video_learner.common.schemas import Draft, DraftBlock, FrameAssessment, Notebook, ReviewResult
 from video_learner.notes.rendering import (
     MARKDOWN,
     AnchorConflict,
@@ -22,9 +22,12 @@ from video_learner.workflows.replay import replay_conversion
 
 class DeterministicProvider:
     def review(self, packet, images):
-        """接受原配图并清除替身提示，只验证独立复审的版本与证据契约。"""
+        """保留原配图与疑点，按职能返回空修改，隔离模型质量。"""
+        step = packet.get("review_step", {})
+        if step.get("kind") == "content" or step.get("mode") == "report":
+            return ReviewResult(frames=None, findings=[])
         selected = {b["frame_id"] for b in packet["chapter"]["blocks"] if b["kind"] == "figure"}
-        return ReviewPass(
+        return ReviewResult(
             frames=[
                 FrameAssessment(
                     frame_id=frame["id"],

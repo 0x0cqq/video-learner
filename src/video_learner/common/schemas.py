@@ -110,11 +110,12 @@ class ReviewFinding(Record):
     blocks: list[DraftBlock] = Field(max_length=20)
 
 
-class ReviewPass(Record):
-    """独立复审的完整结果；无需修改时 findings 为空，仍检查全部候选图片。"""
+class ReviewResult(Record):
+    """单轮审阅结果；frames=null 保留配图，疑点仅按明确编号解决。"""
 
-    frames: list[FrameAssessment] = Field(max_length=30)
+    frames: list[FrameAssessment] | None = Field(max_length=30)
     findings: list[ReviewFinding] = Field(max_length=100)
+    resolved_review_ids: list[int] = Field(default_factory=list, max_length=100)
 
 
 class CompositionImage(Record):

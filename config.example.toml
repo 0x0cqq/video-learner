@@ -33,8 +33,19 @@ reasoning_effort = "none"
 qwen_enable_thinking = true
 qwen_thinking_budget = 1024
 max_output_tokens = 6000
-max_calls = 80
+max_calls = 120
 # 初稿和独立复审共用上述请求上限；关闭后仅生成 r001。
 review_pass = true
 max_retries = 2
 request_timeout_seconds = 90
+
+# 按顺序执行，省略时默认也是以下两轮。自定义列表会整体替换默认列表。
+# 每轮可通过 instruction 多行字符串增加要求；mode="report" 仅登记疑点。
+[[review_steps]]
+name = "visual"
+kind = "visual" # 选图、位置和图注。
+
+[[review_steps]]
+name = "content"
+kind = "content" # 正文保真、衔接和讲义文体，保留配图。
+instruction = ""

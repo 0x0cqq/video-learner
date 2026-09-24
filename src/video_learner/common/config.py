@@ -1,10 +1,10 @@
 """可审查的 TOML 配置；不读取或持久化密钥值。"""
 
 import tomllib
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Literal
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, field_validator, model_validator
 
 from video_learner.common.core import InputError
 from video_learner.common.schemas import Record
@@ -41,6 +41,28 @@ def default_prices() -> dict[str, ModelPrice]:
     return {key: ModelPrice.model_validate(value) for key, value in data["prices"].items()}
 
 
+class ReviewStep(Record):
+    """一个按职能配置的复审步骤；instruction 为用户自定义的审阅要求。"""
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,39}$")
+    kind: Literal["visual", "content"]
+    instruction: str = Field(default="", max_length=20000)
+    mode: Literal["apply", "report"] = "apply"
+
+    @field_validator("name")
+    @classmethod
+    def usable_directory_name(cls, value: str) -> str:
+        """步骤记录使用同名目录，在请求前拒绝 Windows 保留设备名。"""
+        if PureWindowsPath(value).is_reserved():
+            raise ValueError("复审步骤名称不能使用 Windows 保留名称")
+        return value
+
+
+def default_review_steps() -> list[ReviewStep]:
+    """先确定配图，再对照最终配图检查正文。"""
+    return [ReviewStep(name="visual", kind="visual"), ReviewStep(name="content", kind="content")]
+
+
 class Config(Record):
     prices: dict[str, ModelPrice] = Field(default_factory=default_prices)
     provider: Literal["deepseek", "qwen"] = "deepseek"
@@ -61,6 +83,16 @@ class Config(Record):
     instruction: str = ""
     allow_ai_additions: bool = False
     review_pass: bool = True
+    review_steps: list[ReviewStep] = Field(default_factory=default_review_steps, min_length=1)
+
+    @model_validator(mode="after")
+    def unique_review_names(self):
+        """步骤名称用于记录与重放，同一次流程内须唯一。"""
+        names = [step.name for step in self.review_steps]
+        if len(names) != len(set(names)):
+            raise ValueError("复审步骤名称不能重复")
+        return self
+
     asr_backend: Literal["qwen", "local"] = "qwen"
     asr_device: Literal["cpu", "cuda"] = "cpu"
     asr_local_model: str | None = None
@@ -83,7 +115,7 @@ class Config(Record):
     context_max_megabytes: int = Field(default=40, ge=1, le=40)
     api_key_env: str = Field(default="DEEPSEEK_API_KEY", pattern=r"^[A-Za-z_][A-Za-z_0-9]*$")
     secret_file: str | None = None
-    max_calls: int = Field(default=80, ge=1, le=1000)
+    max_calls: int = Field(default=120, ge=1, le=1000)
     request_timeout_seconds: int = Field(default=90, ge=1, le=300)
     max_retries: int = Field(default=2, ge=0, le=4)
     max_output_tokens: int = Field(default=6000, ge=500, le=16000)

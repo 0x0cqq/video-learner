@@ -164,10 +164,10 @@ def freeze_composition_input(
     )
 
 
-def validate_draft(draft: Draft, packet: dict) -> None:
+def validate_draft(draft: Draft, packet: dict, *, check_editorial: bool = True) -> None:
     """检查草稿的证据边界、块类型、补充授权及正文结构；违规抛 TaskError。
 
-    检查的是引用和结构合法性，不能据此认定正文已被原课事实支持。
+    检查的是引用和结构合法性；图文轮和只报告轮可将正文文体检查留给内容轮。
     """
     transcripts = {s["id"]: s for s in packet["transcript"]}
     frames = {f["id"]: f for f in packet["frames"]}
@@ -207,7 +207,7 @@ def validate_draft(draft: Draft, packet: dict) -> None:
         validate_body(block.body)
     if any(c in draft.title for c in "\r\n<>"):
         raise TaskError("模型章节标题包含无效结构")
-    if packet.get("packet_version", 1) >= 2:
+    if check_editorial and packet.get("packet_version", 1) >= 2:
         from video_learner.notes.quality import validate_editorial_structure
 
         validate_editorial_structure(draft, available)

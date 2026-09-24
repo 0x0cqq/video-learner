@@ -13,11 +13,13 @@ def coverage_report(root: Path, revision: str = "r001") -> dict:
     """按章节比较三层图片覆盖；缺少冻结输入时明确留空，不推测历史请求。"""
     book = Notebook.model_validate(read_json(root / "notes.json"))
     record_id = None
+    review_steps = []
     if revision != "r001":
         from video_learner.workflows.revision import load_baseline
 
         manifest, _, book, _ = load_baseline(root, revision)
         record_id = manifest["versions"][revision].get("review_record")
+        review_steps = manifest["versions"][revision].get("review_steps", [])
     frames = {frame.id: frame for frame in book.frames}
     chapters = []
     selected_times = set()
@@ -36,6 +38,19 @@ def coverage_report(root: Path, revision: str = "r001") -> dict:
         if frozen_path is not None and frozen_path.is_file():
             frozen = CompositionInput.model_validate(read_json(frozen_path))
             offered = [image.id for image in frozen.images]
+        if record_id and review_steps:
+            paths = [
+                contained(root, f".work/reviews/{record_id}/{step}/{chapter.id}.input.json")
+                for step in review_steps
+            ]
+            if all(path.is_file() for path in paths):
+                offered = sorted(
+                    {
+                        image.id
+                        for path in paths
+                        for image in CompositionInput.model_validate(read_json(path)).images
+                    }
+                )
         selected = [block.frame_id for block in chapter.blocks if block.kind == "figure"]
         times = [frames[identity].at_us for identity in selected]
         selected_times.update(times)

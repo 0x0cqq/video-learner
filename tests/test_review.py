@@ -5,12 +5,12 @@ from test_conversion import DeterministicProvider
 from test_conversion import converted as converted
 from test_provider import Client, response
 
-from video_learner.common.config import Config
+from video_learner.common.config import Config, ReviewStep, load_config
 from video_learner.common.core import InputError, TaskError
-from video_learner.common.schemas import Draft, DraftBlock, Notebook, ReviewFinding
+from video_learner.common.schemas import Draft, DraftBlock, Notebook, ReviewFinding, ReviewResult
 from video_learner.common.storage import Events, read_json
 from video_learner.notes.composition import evidence_packet, validate_draft
-from video_learner.notes.rendering import expected_spans, image_dependencies
+from video_learner.notes.rendering import expected_spans, image_dependencies, render_notes
 from video_learner.notes.reviewing import apply_review_pass, review_input, reviewed_chapter
 from video_learner.providers.base import DeepSeekProvider
 from video_learner.workflows.conversion import convert
@@ -32,6 +32,8 @@ class EditingProvider(DeterministicProvider):
     def review(self, packet, images):
         """只替换首个解释块，保留相邻图片，供非目标字节和版本隔离检查。"""
         result = super().review(packet, images)
+        if packet.get("review_step", {}).get("kind") == "visual":
+            return result
         block = packet["chapter"]["blocks"][0]
         replacement = DraftBlock(**{key: block[key] for key in DraftBlock.model_fields})
         replacement.body = "修正后的讲义说明。"
@@ -99,7 +101,9 @@ def test_failed_review_keeps_successful_initial_version(video, tmp_path, failure
 
     class Failed(DeterministicProvider):
         def review(self, packet, images):
-            """在初稿提交后模拟复审失败。"""
+            """第一轮成功后模拟第二轮失败，避免发布半条复审流程。"""
+            if packet["review_step"]["kind"] == "visual":
+                return super().review(packet, images)
             raise failure
 
     subtitle = video.with_suffix(".srt")
@@ -155,9 +159,10 @@ def test_review_decisions_and_patches_must_agree(converted):
     result.frames[0].decision = "omit"
     result.frames[-1].decision = "use"
     identity = result.frames[-1].frame_id
-    generated = apply_review_pass(book, packet, result, current)
+    updated, generated = apply_review_pass(book, packet, result, current)
     assert len(image_dependencies(generated)) == 1
-    assert book.chapters[0].blocks[-1].frame_id == identity
+    assert updated.chapters[0].blocks[-1].frame_id == identity
+    assert book.chapters[0].blocks[-1].frame_id != identity
 
 
 def test_body_ids_and_orphan_headings_are_validated_without_word_filter(converted):
@@ -195,7 +200,7 @@ def test_review_preserves_manual_text_and_visual_only_chapter(converted):
     book.chapters[0].blocks[0].sync_status = "manual_unverified"
     result = DeterministicProvider().review(packet, images)
     result.frames[0].related_block_id = packet["chapter"]["blocks"][1]["id"]
-    assert apply_review_pass(book, packet, result, current) == current
+    assert apply_review_pass(book, packet, result, current)[1] == current
     packet["chapter"]["blocks"] = packet["chapter"]["blocks"][1:]
     result = DeterministicProvider().review(packet, images)
     assert len(reviewed_chapter(result, packet).blocks) == 1
@@ -231,10 +236,16 @@ def test_independent_review_schema_and_repairs(converted, supplier, monkeypatch)
     monkeypatch.setattr("video_learner.providers.base.time.sleep", lambda _: None)
     root, _ = converted
     _, _, packet, images = prepared(root)
+    packet["review_step"] = ReviewStep(
+        name="content", kind="content", instruction="专门核对逻辑方向"
+    ).model_dump()
+    packet["current_review"] = [
+        {"id": i, **item} for i, item in enumerate(packet["current_review"])
+    ]
     valid = EditingProvider().review(packet, images)
     invalid = valid.model_copy(deep=True)
-    # 删除文字落点后仍指向它，修复反馈须列出失效关联及实际可用的块。
-    invalid.findings[0].blocks = []
+    # 内容轮试图改图须被拒绝，模型只能在独立修复请求中更正结果。
+    invalid.frames = []
     if supplier == "deepseek":
         client = Client([response(invalid.model_dump_json()), response(valid.model_dump_json())])
         service = DeepSeekProvider(Config(max_calls=2), Events(root), client)
@@ -255,5 +266,175 @@ def test_independent_review_schema_and_repairs(converted, supplier, monkeypatch)
     assert service.review(packet, images) == valid
     assert len(client.requests) == 2
     assert all("旧生成历史" not in json.dumps(r, ensure_ascii=False) for r in client.requests)
+    assert all("专门核对逻辑方向" in json.dumps(r, ensure_ascii=False) for r in client.requests)
     with pytest.raises(TaskError, match="上限"):
         service.review(packet, images)
+
+
+def test_function_pipeline_uses_updated_state_and_keeps_unresolved_issues(converted, tmp_path):
+    """自定义函数按配置顺序串联，两次文字插入不撞 ID；报告轮保留图片和既有疑点。"""
+    root, _ = converted
+    config_path = tmp_path / "review.toml"
+    config_path.write_text(
+        '[[review_steps]]\nname="visual"\nkind="visual"\n'
+        '[[review_steps]]\nname="content"\nkind="content"\ninstruction="保留步骤"\n'
+        '[[review_steps]]\nname="wording"\nkind="content"\n'
+        '[[review_steps]]\nname="check"\nkind="content"\nmode="report"\n',
+        encoding="utf-8",
+    )
+    calls = []
+
+    def visual(packet, images):
+        """换成末张候选并报告一条疑点，留给后续轮观察。"""
+        calls.append(packet["review_step"]["name"])
+        result = DeterministicProvider().review(packet, images)
+        for frame in result.frames:
+            frame.decision = "omit"
+        result.frames[-1].decision = "use"
+        result.findings = [
+            ReviewFinding(
+                target_id=packet["chapter"]["blocks"][0]["id"],
+                kind="fidelity",
+                reason="需要核对原课条件。",
+                evidence_ids=[packet["transcript"][0]["id"]],
+                action="report",
+                blocks=[],
+            )
+        ]
+        return result
+
+    def content(packet, images):
+        """观察前轮最新图块与正文，再插入一个有证据的文字块。"""
+        name = packet["review_step"]["name"]
+        calls.append(name)
+        figures = [b for b in packet["chapter"]["blocks"] if b["kind"] == "figure"]
+        assert len(figures) == 1 and figures[0]["frame_id"] == packet["frames"][-1]["id"]
+        assert figures[0]["id"] in packet["current_markdown"]
+        block = packet["chapter"]["blocks"][0]
+        if name == "wording":
+            assert "补充步骤 content" in packet["current_markdown"]
+        return ReviewResult(
+            frames=None,
+            findings=[
+                ReviewFinding(
+                    target_id=block["id"],
+                    kind="fidelity",
+                    reason="保留原课操作步骤。",
+                    evidence_ids=block["evidence_ids"],
+                    action="insert_after",
+                    blocks=[
+                        DraftBlock(
+                            kind="text",
+                            body=f"补充步骤 {name}",
+                            category="original",
+                            evidence_ids=block["evidence_ids"],
+                            frame_id=None,
+                        )
+                    ],
+                )
+            ],
+            resolved_review_ids=[0] if name == "content" else [],
+        )
+
+    def check(packet, images):
+        """报告模式不提出修改；忽略的已有疑点必须继续保留。"""
+        calls.append(packet["review_step"]["name"])
+        assert "补充步骤 wording" in packet["current_markdown"]
+        assert [item["reason"] for item in packet["current_review"]] == ["需要核对原课条件。"]
+        return ReviewResult(frames=None, findings=[])
+
+    destination = review(
+        root,
+        config_path=config_path,
+        reviewers={
+            "visual": visual,
+            "content": content,
+            "wording": content,
+            "check": check,
+        },
+    )
+    assert calls == ["visual", "content", "wording", "check"]
+    book = replay_revision(root, "r002")
+    assert [item.reason for item in book.review if item.block_id] == ["需要核对原课条件。"]
+    assert [item for item in book.review if item.block_id is None] == [
+        item
+        for item in Notebook.model_validate(read_json(root / "notes.json")).review
+        if item.block_id is None
+    ]
+    blocks = book.chapters[0].blocks
+    assert len({block.id for block in blocks}) == len(blocks) == 4
+    assert len(image_dependencies((destination / "notes.md").read_bytes())) == 1
+    changes = (destination / "changes.md").read_text(encoding="utf-8")
+    assert all(f"## {name}" in changes for name in calls)
+    with pytest.raises(InputError, match="名称"):
+        review(root, reviewers={"unknown": check})
+
+
+def test_functional_application_preserves_inputs_and_enforces_scope(converted):
+    """纯应用不改输入；正文、图文和只报告模式不能越过各自的写入范围。"""
+    root, _ = converted
+    book, current, packet, images = prepared(root)
+    packet["current_review"] = [{"id": i, **v} for i, v in enumerate(packet["current_review"])]
+    packet["review_step"] = ReviewStep(name="content", kind="content").model_dump()
+    result = EditingProvider().review(packet, images)
+    before = book.model_dump_json(), json.dumps(packet), result.model_dump_json()
+    updated, generated = apply_review_pass(book, packet, result, current)
+    assert before == (book.model_dump_json(), json.dumps(packet), result.model_dump_json())
+    assert generated != current and updated != book
+    assert updated.review == book.review
+    assert updated.chapters[0].blocks[1] == book.chapters[0].blocks[1]
+    result.resolved_review_ids = [-1]
+    with pytest.raises(TaskError, match="疑点"):
+        apply_review_pass(book, packet, result, current)
+    result.resolved_review_ids = []
+    result.findings[0].target_id = book.chapters[0].blocks[1].id
+    with pytest.raises(TaskError, match="只能修改文字"):
+        reviewed_chapter(result, packet)
+    result.findings[0].target_id = book.chapters[0].blocks[0].id
+    packet["review_step"] = ReviewStep(name="visual", kind="visual").model_dump()
+    result.frames = DeterministicProvider().review(packet, images).frames
+    with pytest.raises(TaskError, match="只能替换"):
+        reviewed_chapter(result, packet)
+    packet["review_step"]["mode"] = "report"
+    with pytest.raises(TaskError, match="只报告"):
+        reviewed_chapter(result, packet)
+    result.frames = None
+    result.findings = []
+    assert apply_review_pass(book, packet, result, current) == (book, current)
+
+
+def test_visual_review_can_leave_existing_prose_defect_for_content_pass(converted):
+    """旧讲义的正文缺陷应留到内容轮修复，图文轮与只报告轮不能被迫越权修改。"""
+    root, _ = converted
+    book, _, _, _ = prepared(root)
+    book.chapters[0].blocks[0].body = "参见 " + book.frames[0].id
+    current = render_notes(book)
+    for step in (
+        ReviewStep(name="visual", kind="visual"),
+        ReviewStep(name="check", kind="content", mode="report"),
+        ReviewStep(name="content", kind="content"),
+    ):
+        frozen, images = review_input(book, book.chapters[0], Config(), root, current, "r002", step)
+        service = EditingProvider() if step.name == "content" else DeterministicProvider()
+        result = service.review(frozen.packet, images)
+        book, current = apply_review_pass(book, frozen.packet, result, current)
+    assert "修正后的讲义说明" in current.decode()
+    assert "参见 " + book.frames[0].id not in current.decode()
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        "review_steps=[]",
+        'review_steps=[{name="same",kind="visual"},{name="same",kind="content"}]',
+        'review_steps=[{name="../outside",kind="content"}]',
+        'review_steps=[{name="con",kind="content"}]',
+        'review_steps=[{name="code",kind="programming"}]',
+    ],
+)
+def test_invalid_review_configuration_is_rejected(tmp_path, settings):
+    """配置在付费请求前拒绝空流程、重复名称、路径名称及课程类型职能。"""
+    path = tmp_path / "invalid.toml"
+    path.write_text(settings, encoding="utf-8")
+    with pytest.raises(InputError, match="配置无效"):
+        load_config(path)

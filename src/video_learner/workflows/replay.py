@@ -4,7 +4,7 @@ from pathlib import Path
 
 from video_learner.common.config import Config
 from video_learner.common.core import InputError, TaskError, contained
-from video_learner.common.schemas import CompositionInput, Draft, Notebook, ReviewPass
+from video_learner.common.schemas import CompositionInput, Draft, Notebook, ReviewResult
 from video_learner.common.storage import digest, read_json
 from video_learner.notes.composition import (
     apply_chapter_draft,
@@ -112,14 +112,20 @@ def replay_review(root: Path, revision_id: str, version: dict) -> Notebook:
     baseline = (record / "baseline.md").read_bytes()
     config = Config.model_validate(read_json(record / "config.json"))
     book, current = fixed.model_copy(deep=True), baseline
-    for identity in version["review_sections"]:
-        chapter = next(c for c in fixed.chapters if c.id == identity)
-        frozen = CompositionInput.model_validate(read_json(record / f"{identity}.input.json"))
-        rebuilt, _ = review_input(fixed, chapter, config, root, baseline, revision_id)
-        if frozen != rebuilt:
-            raise TaskError(f"{identity} 的复审输入与冻结记录不一致")
-        result = ReviewPass.model_validate(read_json(record / f"{identity}.result.json"))
-        current = apply_review_pass(book, frozen.packet, result, current)
+    steps = config.review_steps if "review_steps" in version else [None]
+    if "review_steps" in version and version["review_steps"] != [s.name for s in steps]:
+        raise TaskError("复审步骤与冻结配置不一致")
+    for step in steps:
+        fixed, baseline = book.model_copy(deep=True), current
+        folder = record / step.name if step else record
+        for identity in version["review_sections"]:
+            chapter = next(c for c in fixed.chapters if c.id == identity)
+            frozen = CompositionInput.model_validate(read_json(folder / f"{identity}.input.json"))
+            rebuilt, _ = review_input(fixed, chapter, config, root, baseline, revision_id, step)
+            if frozen != rebuilt:
+                raise TaskError(f"{identity} 的复审输入与冻结记录不一致")
+            result = ReviewResult.model_validate(read_json(folder / f"{identity}.result.json"))
+            book, current = apply_review_pass(book, frozen.packet, result, current)
     validate_notebook(book, root)
     if current != contained(root, f".work/versions/{revision_id}.generated.md").read_bytes():
         raise TaskError("离线重建的复审 Markdown 与生成快照不一致")
