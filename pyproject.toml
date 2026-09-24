@@ -5,12 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "video-learner"
 version = "0.1.0"
-description = "单视频到图文 Markdown 的转换与修订 CLI"
+description = "单视频图文讲义的转换、修订与 Markdown/HTML/PDF 导出 CLI"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "av>=16",
+    "latex2mathml>=3.81.1",
     "markdown-it-py>=4.2.0",
+    "mdit-py-plugins>=0.6.1",
     "numpy>=2",
     "openai>=3.8.0",
     "pillow>=11",
@@ -30,11 +32,16 @@ local-cuda = [
     "nvidia-cublas-cu12>=12,<13",
     "nvidia-cudnn-cu12>=9,<10",
 ]
+pdf = [
+    "matplotlib>=3.11.2",
+    "reportlab>=5.0.1",
+]
 
 [dependency-groups]
 dev = [
     "nvidia-ml-py>=13.610.43",
     "psutil>=7.2.2",
+    "pypdf>=6.19.0",
     "pytest>=8",
     "ruff>=0.12",
 ]

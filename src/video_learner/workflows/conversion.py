@@ -19,6 +19,7 @@ from video_learner.common.storage import (
     write_json,
 )
 from video_learner.common.usage import summarize_usage
+from video_learner.exports import export_book
 from video_learner.media.evidence import load_subtitles, sample_frames, save_transcript
 from video_learner.media.io import inspect_source, source_file, track_of
 from video_learner.notes.composition import (
@@ -27,7 +28,6 @@ from video_learner.notes.composition import (
     plan_chapters,
     validate_notebook,
 )
-from video_learner.notes.rendering import export_book
 from video_learner.providers.asr import transcribe, validate_asr_config
 from video_learner.providers.base import (
     PROMPT_VERSION,

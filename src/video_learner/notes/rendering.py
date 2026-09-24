@@ -1,19 +1,15 @@
-"""确定性 Markdown 渲染、严格锚点定位与可携带资源复制。"""
+"""确定性 Markdown 渲染、严格锚点定位与图片依赖解析。"""
 
 import html
 import re
-import shutil
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
-from PIL import Image
 
-from video_learner.common.core import InputError, TaskError, contained, timestamp
+from video_learner.common.core import InputError, TaskError, timestamp
 from video_learner.common.schemas import Chapter, FrameEvidence, NoteBlock, Notebook
-from video_learner.common.storage import atomic_bytes, write_json
 
 MARKDOWN = MarkdownIt("commonmark", {"html": True})
 ANCHOR = re.compile(rb"<!-- vl:(begin|end) (section|block) ([a-z][a-z0-9-]{1,63}) -->")
@@ -360,68 +356,3 @@ def local_image(relative: str) -> str:
     if parsed.query:
         raise InputError("本地图片路径不能包含查询参数")
     return parsed.path
-
-
-def copy_dependencies(data: bytes, base: Path, destination: Path) -> None:
-    """验证并复制当前文稿的全部图片依赖，包括用户手加图片。
-
-    已暂存的新图片优先；其余从基线复制，缺失、越界或非位图依赖均阻止发布。
-    """
-    for reference in image_dependencies(data):
-        relative = local_image(reference)
-        target = contained(destination, relative)
-        # 新生成图片已暂存，不能再被基线旧图覆盖；现有目标也必须验证是有效图片。
-        original = target if target.is_file() else contained(base, relative)
-        if not original.is_file():
-            raise InputError(f"图片依赖缺失：{relative}")
-        try:
-            with Image.open(original) as image:
-                image.verify()
-        except (OSError, ValueError) as exc:
-            raise InputError("图片依赖损坏或不是支持的位图") from exc
-        if original != target:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(original, target)
-
-
-def stage_assets(
-    book: Notebook, evidence_root: Path, destination: Path, base: Path | None = None
-) -> None:
-    """为讲义中选定的图块准备独立 assets，优先复用基线版本，再读取证据缓存。"""
-    for chapter in book.chapters:
-        for block in chapter.blocks:
-            if block.kind == "figure":
-                frame = frame_of(book, block.frame_id)
-                relative = f"assets/{frame.id}.png"
-                target = contained(destination, relative)
-                if target.is_file():
-                    continue
-                target.parent.mkdir(parents=True, exist_ok=True)
-                original = contained(base, relative) if base else None
-                if original is None or not original.is_file():
-                    original = contained(evidence_root, frame.path)
-                shutil.copyfile(original, target)
-
-
-def export_book(
-    book: Notebook,
-    evidence_root: Path,
-    destination: Path,
-    markdown: bytes | None = None,
-    *,
-    base: Path | None = None,
-) -> bytes:
-    """校验锚点及图片依赖后导出文稿、索引、来源和疑点，返回实际写入的文稿字节。
-
-    markdown 保留手改字节，base 提供基线图片和手加依赖；整版发布和加锁由上层负责。
-    """
-    data = render_notes(book) if markdown is None else markdown
-    expected_spans(data, book)
-    stage_assets(book, evidence_root, destination, base)
-    copy_dependencies(data, base if base is not None else destination, destination)
-    atomic_bytes(contained(destination, "notes.md"), data)
-    atomic_bytes(contained(destination, "review.md"), render_review(book))
-    atomic_bytes(contained(destination, "sources.md"), render_sources(book))
-    write_json(contained(destination, "notes.json"), book.model_dump())
-    write_json(contained(destination, "source.json"), book.source.model_dump())
-    return data

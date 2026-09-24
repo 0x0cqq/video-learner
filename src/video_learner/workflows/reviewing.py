@@ -17,12 +17,12 @@ from video_learner.common.storage import (
     write_json,
 )
 from video_learner.common.usage import summarize_usage
+from video_learner.exports import export_book
 from video_learner.media.io import inspect_source
 from video_learner.notes.composition import validate_notebook
 from video_learner.notes.rendering import (
     AnchorConflict,
     expected_spans,
-    export_book,
     image_dependencies,
     local_image,
 )

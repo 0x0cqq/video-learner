@@ -290,3 +290,11 @@ CUDA 测量使用 RTX 4070 系列 12GB、CUDA 12/cuDNN 9、large-v3-turbo/int8_f
 - 基于该 r002，用自定义 TOML 仅配置 `lecture_style` 内容轮、`mode="report"` 和文体审阅指令，选择 Qwen 实跑 revise --review：1 次请求无重试，17.0 秒、估算 0.014129 CNY，生成 r003。r002/r003 的 notes.md 逐字相同，6 张图片依赖均存在，报告增加了两条模型意见。
 - 新 r001、两轮 r002、自定义只报告 r003 都完成离线重放；旧整课 `software-lesson06-quality-20260924` 的单轮 r003 仍通过 34 章重放。新版覆盖工具成功读取两轮图片并集。自定义配置和报告位于忽略的 `artifacts/evaluations/lesson06-modular-20260924/`。
 - 本次验证模块化契约与短片段实跑，没有重跑两轮复审的完整课程，也没有完成配图和内容的逐项人工标注；模型报告噪声见 content-quality.md。
+
+## 2026-09-24：Markdown、HTML、PDF 导出验证
+
+- Windows / Python 3.12，`uv run --no-sync pytest -q`：125 项通过；Ruff 规则、格式和 `uv lock --check` 通过。新增用例验证可携带目录离线导出、CRLF 与手改原字节、共享索引再次导出、HTML 静态化及公式、PDF 中文/长表/代码分页与公式回退、无效图片和路径、后续适配器失败不发布、显式基线与输出保护。PDF 用例在可选依赖和中文字体可用时执行，本机全部运行。
+- 以第六课人工校订阅读副本 `output/software-lesson06-quality-reading-20260924/` 为输入，一次 CLI 导出三种格式至 `output/pdf/lesson06-20260924/`，退出码 0。34 章、95 张截图；导出 Markdown 与输入逐字节一致，图片、`notes.json` 和 `source.json` 完整。本次没有原视频解码、语音识别或模型请求。
+- HTML 在独立无头 Edge 中离线打开，95 张图片全部加载、4 个 MathML 公式；1440 像素桌面和 390 像素手机宽度均无整页横向溢出，已查看两种宽度及正文中段截图。
+- PDF 共 73 张 A4 页面，含 95 张截图和 3 张公式图片。Poppler 渲染全部页面，查看五份覆盖全页的拼图，并放大检查代码页、公式页和来源长表页；未见截断、重叠或空白缺图。最终产物重新渲染的 73 张页面图片与已检查版面逐字节相同。评估图片位于 `artifacts/evaluations/html-pdf-20260924/`，均不提交。
+- 一处含 `\bmod` 的公式超出当前 Mathtext 子集，PDF 第 39 页显式保留完整 LaTeX 原文，CLI 与 `export.json` 均给出提示；HTML 可渲染。此次验证覆盖 Windows 字体和本课排版，不代表任意 LaTeX、其他平台字体或全部浏览器均已验收。仅验证导出内容保留和版面，未新增课程事实正确性审阅，也未做性能优化。

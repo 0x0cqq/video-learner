@@ -20,6 +20,7 @@ from video_learner.common.storage import (
     read_json,
     write_json,
 )
+from video_learner.exports import export_book
 from video_learner.media.evidence import register_frame
 from video_learner.media.io import inspect_source
 from video_learner.notes.composition import (
@@ -31,7 +32,6 @@ from video_learner.notes.composition import (
 from video_learner.notes.rendering import (
     AnchorConflict,
     expected_spans,
-    export_book,
     frame_of,
     image_dependencies,
     local_image,

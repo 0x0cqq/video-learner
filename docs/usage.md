@@ -16,7 +16,7 @@ DeepSeek 凭据从 `DEEPSEEK_API_KEY` 读取，Qwen 从 `DASHSCOPE_API_KEY` 读�
 
 ## 检查素材
 
-直接运行 `uv run video-learner` 或添加 `--help` 可查看命令帮助，退出码为 0。查看子命令参数可运行 `uv run video-learner inspect --help`（`convert`、`revise` 同理）；未知命令、未知选项或缺少必填参数时退出码为 2，并显示参数错误。
+直接运行 `uv run video-learner` 或添加 `--help` 可查看命令帮助，退出码为 0。查看子命令参数可运行 `uv run video-learner inspect --help`（`convert`、`revise`、`export` 同理）；未知命令、未知选项或缺少必填参数时退出码为 2，并显示参数错误。
 
 ```powershell
 uv run video-learner inspect "D:\media\programming" --json --decode
@@ -207,6 +207,32 @@ DeepSeek 默认使用配置中的 `deepseek-flash`。默认 `deepseek_context="h
 [官方缓存规则](https://api-docs.deepseek.com/guides/kv_cache/)采用完整前缀单元匹配，缓存是尽力而为，不能保证命中。追加历史会增加上传体积与累计输入量，因此有缓存不等于一定更便宜。一门课能否放下取决于所选模型的限制、截图数量、讲义输出和 HTTP 请求体大小，可用默认预算观察实际命中。
 
 讲义按知识关系使用连贯段落、三级小标题和必要的并列比较表；论点与依据、条件与结论通过简短语句连接。章节无固定栏目数量，少量新增内容保持简短，原课未说明的解释归待核对或显式授权的 AI 补充。精度和来源仍集中于独立索引。
+
+## 导出阅读副本
+
+`export` 从已有版本的当前 `notes.md` 导出，保留手改文字和本地图片，不调用模型，也无需原视频或凭据。输入可以是独立版本/校订稿目录；若指定 `--base`，则输入工作目录并显式选择版本。输出必须是全新目录。
+
+```powershell
+# 从工作目录选择复审版，一次导出 Markdown 和离线 HTML
+uv run video-learner export ".\output\my-notes" --base r002 --format markdown --format html --output ".\output\reading"
+
+# 直接读取可携带的版本目录，安装/启用可选 PDF 依赖后导出
+uv run --extra pdf video-learner export ".\output\my-notes\revisions\r002" --format pdf --output ".\output\reading-pdf"
+```
+
+`--format` 可重复使用，支持 `markdown`、`html`、`pdf`，省略时为 Markdown。PDF 依赖也可提前用 `uv sync --extra pdf` 安装，随后以 `uv run --no-sync` 执行；若同时使用本地 ASR/CUDA，保留对应 extra 或用 `uv sync --all-extras` 安装全部可选依赖。
+
+| 格式 | 产物与阅读方式 |
+| --- | --- |
+| Markdown | `notes.md`、`sources.md`、`review.md` 及引用图片；正文保留原字节，整个目录可复制和继续编辑 |
+| HTML | `notes.html`，图片内嵌、来源和疑点在附录；现代浏览器直接离线打开，公式为原生 MathML |
+| PDF | `notes.pdf`，嵌入字体和图片，A4 分页、长表重复表头、目录链接和来源/疑点附录；适合阅读及打印 |
+
+三种格式共享当前文档快照，布局按用途分别处理。PDF 默认使用 Windows 微软雅黑或宋体，找不到时可指定 `--pdf-font "D:\fonts\Chinese.ttf"`（TTF/TTC TrueType 字体）；其他系统需提供可嵌入且覆盖中文的字体。PDF 公式支持 Mathtext 子集，无法排版的公式显示带标记的 LaTeX 原文；字体缺字或公式转换问题同时在 CLI 和 `export.json` 提示。
+
+每个导出目录保存 `notes.json`、`source.json` 和 `export.json`。HTML/PDF 单文件可单独携带；再次导出需要 Markdown、索引和图片一起保留。正文与索引不同步时，来源附录标记手改未核对。手写 HTML 仅保留静态文字、图片和锚点；任意脚本或样式不会运行，代码示例保留原文。
+
+导出失败不会发布部分文件，源目录及已有输出保持不变。`export` 生成阅读副本，不产生 r003 等修订版本；修改讲义后可重新导出到新目录。继续执行 `revise` 使用原工作目录和明确基线。
 
 ## 低成本审阅与独立校订稿
 

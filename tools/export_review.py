@@ -8,8 +8,9 @@ from video_learner.common.config import Config
 from video_learner.common.core import InputError, output_path
 from video_learner.common.schemas import Draft, Notebook
 from video_learner.common.storage import directory_lock, read_json
+from video_learner.exports import export_book
 from video_learner.notes.composition import evidence_packet, validate_draft, validate_notebook
-from video_learner.notes.rendering import export_book, render_notes
+from video_learner.notes.rendering import render_notes
 
 
 def export_review(root: Path, edited: Path, output: Path) -> Path:
