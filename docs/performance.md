@@ -27,3 +27,9 @@ ASR 的并发设置见[使用指南](usage.md#asr-并发)，图文整理保持�
 真实小范围对照数据见[验证记录](validation.md#固定证据的缓存对照)。缓存节省应同时观察未命中输入、已命中输入、输出长度及总费用；高命中率本身不是净省费证明。
 
 同机四课 CUDA 整段识别与阶段计时见[历史整课验证](validation.md#四个完整课时与学习者审阅)。
+
+## 图片覆盖定位
+
+`uv run --no-sync python tools/audit_coverage.py output/sample --output artifacts/evaluations/sample-coverage` 读取已完成讲义的 `notes.json`，在独立新目录写入逐章覆盖表和 JSON。报告区分采集候选、冻结输入中实际提供的图片、正文选用图片，并列出最长配图时间间隔，便于定位应审阅的章节。
+
+旧产物缺少冻结输入时，实际送图数标为未知；工具不反向解析 Markdown 手改。图片数量和时间间隔仅用于发现审阅位置，语义对应及关键画面是否遗漏仍须对照转写和原帧判断。工具不调用模型、不改变讲义。

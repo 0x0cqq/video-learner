@@ -59,6 +59,7 @@ tests/
 tools/
   profile_conversion.py  # 既有日志归因与离线本地阶段 profiling
   profile_asr.py         # 指定短片段的 CPU/CUDA ASR 测量
+  audit_coverage.py      # 只读对比候选、实际送图与正文配图，定位漏图阶段
   replay_conversion.py   # 无模型调用的转换/文字修订结果核对
   replay_composition.py  # 复用章节证据，显式 --live 时重新请求模型
   export_review.py       # 人工校订索引的独立阅读副本导出
