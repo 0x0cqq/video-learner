@@ -65,6 +65,8 @@ def test_stage_summary_does_not_double_count_or_mix_revisions():
     revised = module.summarize_events(current)
     assert revised["stage_seconds_total"] == 26
     assert revised["model_requests"]["sum_seconds"] == 14
+    current[10]["status"] = "failed"
+    assert module.summarize_events(current)["stage_seconds"]["review"] == 4
 
 
 def test_stream_timing_separates_first_chunks_and_excludes_thinking_text(tmp_path, monkeypatch):

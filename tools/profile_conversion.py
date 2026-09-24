@@ -48,7 +48,7 @@ def summarize_events(records: list[dict]) -> dict:
             break
         if stage.startswith("revise:"):
             break
-        if status == "completed" and (
+        if (status == "completed" or stage == "review" and status in ("failed", "cancelled")) and (
             stage
             in ("prepare", "transcribe", "sample", "plan_chapters", "validate_export", "review")
             or stage.startswith("compose:")

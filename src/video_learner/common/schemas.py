@@ -92,7 +92,9 @@ class FrameAssessment(Record):
 
     frame_id: str
     decision: Literal["use", "omit"]
-    related_block_id: str | None
+    related_block_id: str | None = Field(
+        description="use 时指向修改后保留的原块：文字块表示放在其后，图片块表示沿用原图位置"
+    )
     transcript_ids: list[str]
     reason: str = Field(min_length=1, max_length=1000)
 

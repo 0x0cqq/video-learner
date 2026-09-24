@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-P0 的 `inspect`、`convert`、`revise` 已实现。转换默认保存初稿 r001，再独立对照原始证据复审，生成 `revisions/r002/notes.md`；CLI 返回复审版路径。局部修改保留旧版本及非目标手改内容。语音识别默认使用阿里云 Qwen，可显式选择本地 CPU/CUDA；图文整理默认使用 DeepSeek，也可选择 Qwen。
+P0 的 `inspect`、`convert`、`revise` 已实现。转换默认保存初稿 r001，再独立对照原始证据复审，生成 `revisions/r002/notes.md`；CLI 返回复审版路径。局部修改保留旧版本及非目标手改内容。自动复审仍有漏检和误改，关键内容需要对照原课核对。语音识别默认使用阿里云 Qwen，可显式选择本地 CPU/CUDA；图文整理默认使用 DeepSeek，也可选择 Qwen。
 
 新生成的转换和文字修订会保存模型调用前的证据输入与已采用草稿，可只读核对固定模型结果下的生成过程。当前行为与数据边界见[技术设计](docs/technical-design.md)，运行方法见[使用指南](docs/usage.md)，已执行验证及内容质量限制见[历史验证记录](docs/validation.md)。
 

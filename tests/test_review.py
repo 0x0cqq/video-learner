@@ -140,8 +140,8 @@ def test_review_decisions_and_patches_must_agree(converted):
     with pytest.raises(TaskError, match="全部候选图"):
         reviewed_chapter(changed, packet)
     changed = result.model_copy(deep=True)
-    changed.frames[0].related_block_id = packet["chapter"]["blocks"][1]["id"]
-    with pytest.raises(TaskError, match="文字块"):
+    changed.findings[0].blocks = []
+    with pytest.raises(TaskError, match="保留的块"):
         reviewed_chapter(changed, packet)
     changed = result.model_copy(deep=True)
     changed.findings[0].evidence_ids = ["tr-outside"]
@@ -194,6 +194,7 @@ def test_review_preserves_manual_text_and_visual_only_chapter(converted):
     book.chapters[0].blocks[0].body = packet["frames"][0]["id"]
     book.chapters[0].blocks[0].sync_status = "manual_unverified"
     result = DeterministicProvider().review(packet, images)
+    result.frames[0].related_block_id = packet["chapter"]["blocks"][1]["id"]
     assert apply_review_pass(book, packet, result, current) == current
     packet["chapter"]["blocks"] = packet["chapter"]["blocks"][1:]
     result = DeterministicProvider().review(packet, images)
@@ -232,7 +233,8 @@ def test_independent_review_schema_and_repairs(converted, supplier, monkeypatch)
     _, _, packet, images = prepared(root)
     valid = EditingProvider().review(packet, images)
     invalid = valid.model_copy(deep=True)
-    invalid.frames = []
+    # 删除文字落点后仍指向它，修复反馈须列出失效关联及实际可用的块。
+    invalid.findings[0].blocks = []
     if supplier == "deepseek":
         client = Client([response(invalid.model_dump_json()), response(valid.model_dump_json())])
         service = DeepSeekProvider(Config(max_calls=2), Events(root), client)

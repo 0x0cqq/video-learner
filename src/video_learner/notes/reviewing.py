@@ -146,12 +146,18 @@ def reviewed_chapter(result: ReviewPass, packet: dict) -> Chapter:
     # 逐图决定是配图的唯一来源，位置和新图块由本地代码生成。
     selected = [item for item in result.frames if item.decision == "use"]
     available_figures = {block.frame_id: block for block in updated if block.kind == "figure"}
-    remaining = {block.id for block in updated if block.kind == "text"}
-    if not remaining:
-        # 没有可用文字的纯图章节，以原图片块作为放置锚点，仍允许复审其视觉内容。
-        remaining = {block.id for block in updated}
-    if any(item.related_block_id not in remaining for item in selected):
-        raise TaskError("选用图片须关联修改后仍保留的文字块")
+    # 文字块表示放在解释后；原图片块表示沿用该位置，不猜测它与相邻段落的关系。
+    remaining = {block.id for block in updated}
+    invalid_links = {
+        item.frame_id: item.related_block_id
+        for item in selected
+        if item.related_block_id not in remaining
+    }
+    if invalid_links:
+        raise TaskError(
+            f"选用图片须关联修改后仍保留的块；无效关联：{invalid_links}；"
+            f"可关联的保留块：{sorted(remaining)}。请重新关联或将该图片设为 omit"
+        )
     figures_after: dict[str, list[NoteBlock]] = {}
     for index, assessment in enumerate(selected, 1):
         figure = available_figures.get(assessment.frame_id)
