@@ -8,6 +8,8 @@ P0 的 `inspect`、`convert`、`revise`、`export` 已实现。转换默认保�
 
 新生成的转换和文字修订会保存模型调用前的证据输入与已采用草稿，可只读核对固定模型结果下的生成过程。当前行为与数据边界见[技术设计](docs/technical-design.md)，运行方法见[使用指南](docs/usage.md)，已执行验证及内容质量限制见[历史验证记录](docs/validation.md)。
 
+HTML/PDF 阅读导出支持中文括号、引号边界的双星号加粗；Markdown 保留当前原文。外部编辑器的写法与格式支持见[阅读导出说明](docs/usage.md#导出阅读副本)。
+
 ## 文档入口
 
 - [用户故事](docs/user-stories.md)：P0/P1 与验收标准。

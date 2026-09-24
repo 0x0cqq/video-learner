@@ -230,6 +230,8 @@ uv run --extra pdf video-learner export ".\output\my-notes\revisions\r002" --for
 
 三种格式共享当前文档快照，布局按用途分别处理。PDF 默认使用 Windows 微软雅黑或宋体，找不到时可指定 `--pdf-font "D:\fonts\Chinese.ttf"`（TTF/TTC TrueType 字体）；其他系统需提供可嵌入且覆盖中文的字体。PDF 公式支持 Mathtext 子集，无法排版的公式显示带标记的 LaTeX 原文；字体缺字或公式转换问题同时在 CLI 和 `export.json` 提示。
 
+HTML/PDF 支持汉字紧邻括号、引号的双星号加粗，例如 `体现**术语（term）**的含义`。Markdown 文件保留原文；在采用严格 CommonMark 的外部编辑器中，可写成 `体现 **术语（term）** 的含义`，用空格明确加粗边界。
+
 每个导出目录保存 `notes.json`、`source.json` 和 `export.json`。HTML/PDF 单文件可单独携带；再次导出需要 Markdown、索引和图片一起保留。正文与索引不同步时，来源附录标记手改未核对。手写 HTML 仅保留静态文字、图片和锚点；任意脚本或样式不会运行，代码示例保留原文。
 
 导出失败不会发布部分文件，源目录及已有输出保持不变。`export` 生成阅读副本，不产生 r003 等修订版本；修改讲义后可重新导出到新目录。继续执行 `revise` 使用原工作目录和明确基线。

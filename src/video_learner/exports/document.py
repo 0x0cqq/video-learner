@@ -1,12 +1,15 @@
 """三个导出适配器共用的文档快照、语法节点和只读图片资源。"""
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from markdown_it import MarkdownIt
+from markdown_it.rules_inline import emphasis
+from markdown_it.rules_inline.state_inline import StateInline
 from markdown_it.token import Token
 from mdit_py_plugins.dollarmath import dollarmath_plugin
 from PIL import Image
@@ -23,13 +26,39 @@ from video_learner.notes.rendering import (
 )
 
 
+def chinese_strong(state: StateInline, silent: bool) -> bool:
+    """允许汉字与标点之间的双星号成对加粗，保留原解析器的嵌套及转义规则。"""
+    start, first = state.pos, len(state.delimiters)
+    if not emphasis.tokenize(state, silent):
+        return False
+    if state.src[start : state.pos] == "**":
+        before = state.src[start - 1] if start else " "
+        after = state.src[state.pos] if state.pos < state.posMax else " "
+        # CommonMark 将汉字视为词内字符，导致「文**（词）**字」两侧均无法配对。
+        opens = is_han(before) and unicodedata.category(after).startswith("P")
+        closes = unicodedata.category(before).startswith("P") and is_han(after)
+        for delimiter in state.delimiters[first:]:
+            delimiter.open |= opens
+            delimiter.close |= closes
+    return True
+
+
+def is_han(character: str) -> bool:
+    """识别统一及兼容汉字（含扩展区），避免改变拉丁词内标点的强调规则。"""
+    return unicodedata.name(character, "").startswith(
+        ("CJK UNIFIED IDEOGRAPH-", "CJK COMPATIBILITY IDEOGRAPH-")
+    )
+
+
 def parser() -> MarkdownIt:
-    """用同一语法解析表格、删除线和美元符号公式，代码围栏保持原样。"""
-    return (
+    """共享表格、公式与中文加粗语法；代码和转义字面量沿用 CommonMark。"""
+    md = (
         MarkdownIt("commonmark", {"html": True})
         .enable(["table", "strikethrough"])
         .use(dollarmath_plugin, allow_labels=False)
     )
+    md.inline.ruler.at("emphasis", chinese_strong)
+    return md
 
 
 class StaticHTML(HTMLParser):

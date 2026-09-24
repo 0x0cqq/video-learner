@@ -2,6 +2,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from markdown_it import MarkdownIt
 from PIL import Image
 from test_conversion import converted as converted
 from typer.testing import CliRunner
@@ -9,7 +10,48 @@ from typer.testing import CliRunner
 from video_learner.cli import app
 from video_learner.common.core import InputError
 from video_learner.common.storage import read_json
+from video_learner.exports.document import parser
 from video_learner.workflows.exporting import export
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("体现**术语（term）**的含义", "体现<strong>术语（term）</strong>的含义"),
+        ("添加**“确认”的按钮**。", "添加<strong>“确认”的按钮</strong>。"),
+        ("通过 **回放（replay）**恢复", "通过 <strong>回放（replay）</strong>恢复"),
+        ("按**（说明）**操作", "按<strong>（说明）</strong>操作"),
+        ("按**(说明)**操作", "按<strong>(说明)</strong>操作"),
+        (
+            "按**“`x` 与 *重点*”**操作",
+            "按<strong>“<code>x</code> 与 <em>重点</em>”</strong>操作",
+        ),
+        (
+            "按**[“说明”](https://example.com)**操作",
+            '按<strong><a href="https://example.com">“说明”</a></strong>操作',
+        ),
+    ],
+)
+def test_chinese_strong_punctuation(source, expected):
+    """汉字紧邻加粗边界的标点仍能成对解析，内部代码、斜体和链接沿用原规则。"""
+    assert parser().renderInline(source) == expected
+
+
+def test_chinese_strong_keeps_literal_and_standard_markdown():
+    """代码、转义、公式、URL、未闭合标记及普通英文强调不能被格式修复误改。"""
+    source = (
+        "代码 `按**（说明）**操作`，转义 按\\*\\*（说明）\\*\\*操作。\n\n"
+        '```python\ntext = "按**（说明）**操作"\n```\n\n'
+        '    text = "按**（说明）**操作"\n\n'
+        "[链接](https://example.com/文**（说明）**字)\n\n"
+        "未闭合**（说明）。 ** 空白 ** **尾空白 **\n\n"
+        "foo**(bar)**baz **bold** *em* __strong__ a_b_c ***both***\n\n"
+        "按*（说明）*操作 按***（说明）***操作\n\n"
+        "实体 &#42;&#42;（说明）&#42;&#42; 字面量\n"
+    )
+    assert parser().render(source) == MarkdownIt("commonmark").render(source)
+    tokens = parser().parseInline(r"$x**（y）**z$")[0].children
+    assert [(token.type, token.content) for token in tokens] == [("math_inline", "x**（y）**z")]
 
 
 def pdf_font():
@@ -35,7 +77,7 @@ def test_export_portable_manual_markdown_and_static_html(converted, tmp_path):
     edited = (
         path.read_bytes().replace(b"\n", b"\r\n")
         + (
-            '\r\n手改补充 **保留**。\r\n\r\n<img src="assets/hand.png" onerror="alert(1)">\r\n'
+            '\r\n手改补充**“保留”**原文。\r\n\r\n<img src="assets/hand.png" onerror="alert(1)">\r\n'
             "<script>alert(2)</script>\r\n\r\n| 项目 | 数值 |\r\n|---|---|\r\n| 甲 | 2 |\r\n"
             "\r\n公式 $x^2$。\r\n\r\n```html\r\n<script>literal()</script>\r\n```\r\n"
         ).encode()
@@ -60,6 +102,7 @@ def test_export_portable_manual_markdown_and_static_html(converted, tmp_path):
     assert (target / "assets/hand.png").read_bytes() == (portable / "assets/hand.png").read_bytes()
     html = (target / "notes.html").read_text(encoding="utf-8")
     assert "手改补充" in html and "<table>" in html and "<math" in html
+    assert "手改补充<strong>“保留”</strong>原文。" in html
     assert html.count('src="data:image/') == 2
     assert "<script>" not in html and "onerror=" not in html
     assert "&lt;script&gt;literal()&lt;/script&gt;" in html
@@ -81,13 +124,15 @@ def test_pdf_paginates_tables_code_and_keeps_math_fallback(converted, tmp_path):
         f"| {i} | 分页表格第 {i} 行 |" for i in range(80)
     )
     code = "\n\n```python\n" + "\n".join(f"print('line_{i}')" for i in range(120)) + "\n```\n"
-    addition = table + code + r"公式 $\frac{a}{b}$ 和 $\notacommand{keep}$。"
+    addition = "\n\n显示**（加粗）**文字。\n\n" + table + code
+    addition += r"公式 $\frac{a}{b}$ 和 $\notacommand{keep}$。"
     path.write_bytes(path.read_bytes() + addition.encode())
     target = export(root, tmp_path / "pdf", ["pdf"], pdf_font=font)
     reader = PdfReader(target / "notes.pdf")
     text = "\n".join(page.extract_text() for page in reader.pages)
     assert len(reader.pages) > 5
     assert "自造声音与变化画面" in text and "79" in text
+    assert "显示（加粗）文字" in text and "**" not in text
     assert "line_0" in text and "line_119" in text
     assert "notacommand" in text and "LaTeX" in text
     assert sum(len(page.images) for page in reader.pages) >= 2

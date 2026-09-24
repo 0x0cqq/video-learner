@@ -182,6 +182,8 @@ output/sample/
 
 `exports/document.py:prepare_document()` 生成 `ExportDocument`：Notebook 元数据快照、正文/来源/疑点三个文档部分，以及已验证的本地图片映射。每部分同时保存原始 Markdown 字节和共享的 Markdown-it 语法节点，包含表格、代码、图片和公式。当前手改文稿优先于结构化正文，不能仅从旧 Notebook 重新生成全文。导出命令发现当前正文与基线快照不同，会在副本标记 `manual_unverified`；独立目录没有生成快照时，采用与 Notebook 重渲染结果的保守比较。输入索引保持不变。
 
+共享解析器以 CommonMark 为基础，对双星号加粗增加中文边界规则：标记外侧是汉字、内侧是标点时也允许配对，例如 `体现**术语（term）**的含义`。配对和嵌套仍交给原解析器；代码、转义及公式保留字面内容。该规则用于 HTML/PDF 的语法节点，Markdown 导出保留原字节，外部编辑器的显示取决于其 Markdown 规则。
+
 三个适配器均为 `write(document, destination) -> list[str]` 普通函数，PDF 另接受字体参数；`write_document()` 顺序调用所选函数。没有插件注册、继承层级或多级转换管线。各格式消费同一份快照，不需要先运行 Markdown 适配器；按实际阅读方式各自布局：
 
 - Markdown 保存正文原字节、相对图片、来源及疑点文件，保留锚点与换行。
