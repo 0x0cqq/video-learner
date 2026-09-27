@@ -18,6 +18,28 @@ ASR 的并发设置见[使用指南](usage.md#asr-并发)，图文整理保持�
 
 已执行的 CPU/CUDA 测量与适用范围见[历史验证记录](validation.md#2026-09-14-短片段性能测量)。
 
+## 开源 Qwen3-ASR 短片段测量
+
+`tools/profile_qwen_asr.py` 使用原生 Transformers 的 Qwen3-ASR 权重，在独立环境中读取已有转换目录的 `transcript.jsonl` 与 `.work/audio`。输入须为 5–180 秒的短片段；已有转写只提供窗口元数据，文本不作为模型提示。工具保留原课时间区间，只生成独立评估报告，不登记讲义版本。
+
+```powershell
+uv venv --python 3.12 artifacts/envs/qwen3-asr
+uv pip install --python artifacts/envs/qwen3-asr/Scripts/python.exe torch --index-url https://download.pytorch.org/whl/cu128
+uv pip install --python artifacts/envs/qwen3-asr/Scripts/python.exe "transformers>=5.13,<6" librosa soundfile psutil nvidia-ml-py
+artifacts/envs/qwen3-asr/Scripts/python.exe tools/profile_qwen_asr.py output/sample --model 0.6B --output artifacts/asr/qwen-small
+```
+
+可选 `--model 1.7B`、`--batch-size 1|2|3|6` 和 `--language English`。每次加载一次模型并测量两轮，以 CUDA BF16、贪心解码运行；不启用词级对齐或额外术语提示。报告记录实际依赖版本和权重路径、在线下载时的 HF revision、下载及加载耗时、WAV 读取/预处理/推理时间、PyTorch 显存分配与保留峰值，以及 100 ms 采样的 RSS/整卡占用。推理时间不含原视频解码和结果落盘，比较现有 faster-whisper profiling 时须保留这个口径差异。模型输出达到 token 上限即报错，避免将截断文本记为完成。
+
+首次使用会下载官方权重；已缓存后可设置 `HF_HUB_OFFLINE=1` 完全离线执行。安装环境和真实输出保存在忽略目录，生产依赖与默认 ASR 后端独立维护。质量结论仍需人工听写参考稿，不能用输入目录里的云端文本替代真值。
+
+也可从 Qwen 在魔搭的官方仓库预先下载同格式权重，再显式传入本地目录；`--model` 与目录中的模型规格应一致：
+
+```powershell
+uv tool run --from modelscope-hub modelscope download --model Qwen/Qwen3-ASR-0.6B-hf --local_dir artifacts/models/Qwen3-ASR-0.6B-hf
+artifacts/envs/qwen3-asr/Scripts/python.exe tools/profile_qwen_asr.py output/sample --model 0.6B --model-path artifacts/models/Qwen3-ASR-0.6B-hf --output artifacts/asr/qwen-small-local
+```
+
 ## 冻结证据回放
 
 `uv run python tools/replay_composition.py output/sample --output artifacts/replay/example --sections ch-001 ch-002` 默认只准备证据包，不创建模型客户端。新产物使用原始调用前冻结的章节输入；较早产物从现有讲义索引重组并提示。加 `--live --secret secrets/deepseek.secret` 才发送指定章节；每次最多三章、无重试。`--context chapter|history` 比较独立逐章与所选章节历史策略，不重建未选章节或原始修复轮的完整历史。新输出保存 packet、draft 和 usage，输入讲义及其证据保持只读，不重复 ASR 或媒体采样。

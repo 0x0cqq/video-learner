@@ -549,3 +549,26 @@ Windows CUDA 预检最初用 ctypes 默认 DLL 搜索方式，未使用用户配
 性能同时记录加载、首次与后续转写、实时率、RSS/整卡显存和实际 API 用量。初轮固定真实音频切片，只比较识别器；如需调整 VAD 或切片长度，另做实验并保留原课时间映射。最终对最有希望的两种方案固定截图、图文模型与提示词生成少量讲义，检查错误是否传入概念、代码或公式，以及实际修订负担。人工真值完成前只报告差异，不以云端输出充当准确率真值，也不自动切换供应商。
 
 检索依据：[faster-whisper](https://github.com/SYSTRAN/faster-whisper)、[SenseVoice 的 sherpa-onnx Windows 支持](https://k2-fsa.github.io/sherpa/onnx/sense-voice/index.html)、[Qwen3-ASR 官方实现](https://github.com/QwenLM/Qwen3-ASR)、[阿里云价格](https://help.aliyun.com/zh/model-studio/model-pricing)、[Paraformer 文件接口](https://help.aliyun.com/zh/model-studio/paraformer-recorded-speech-recognition-restful-api)。
+
+## 2026-09-27：开源 Qwen3-ASR 实验与其他候选
+
+用户要求试用开源 Qwen3-ASR，并检索相似模型和接口。采用官方 `Qwen3-ASR-0.6B-hf` / `1.7B-hf` 与原生 Transformers 路径；官方模型卡明确从 Transformers 5.13 支持，因此无需安装原 `qwen-asr` 包附带的 Web UI、日/韩语对齐依赖或部署 vLLM 服务。独立环境放在忽略的 `artifacts/envs/qwen3-asr`，通过开发工具 `tools/profile_qwen_asr.py` 使用已存短片段的相同 WAV；生产依赖和默认后端保持原样。运行方法见 [性能工具](performance.md#开源-qwen3-asr-短片段测量)，实际结果及限制记录在 validation.md、content-quality.md。
+
+以下是当日官方资料检索，除单独记录的模型外均未在本机实测，也未向新服务上传课程音频：
+
+| 候选 | 用途与接入取舍 | 一手资料 |
+| --- | --- | --- |
+| Qwen3-ASR 0.6B / 1.7B | 本地多语种识别，支持上下文/术语提示；词级对齐需另一个 ForcedAligner 模型，本轮只保留真实窗口区间 | [原生模型卡](https://huggingface.co/Qwen/Qwen3-ASR-0.6B-hf) |
+| SenseVoiceSmall | CPU INT8 / ONNX 候选，sherpa-onnx 支持 Windows；适合评估较低部署与资源成本 | [运行时文档](https://k2-fsa.github.io/sherpa/onnx/sense-voice/index.html) |
+| Fun-ASR-Nano | 官方提供中英日识别、上下文与热词入口；另有多语种模型。原生 HF 版本仅做生成式转写，时间戳/分离能力需分别检查所选运行时 | [官方 HF 模型卡](https://huggingface.co/FunAudioLLM/Fun-ASR-Nano-2512-hf) |
+| FireRedASR2-AED / LLM | 支持中文、方言、英语及混说；AED 提供词时间与置信度。作为中文课程质量候选，官方榜单不等于本课程准确率 | [官方仓库](https://github.com/FireRedTeam/FireRedASR2S) |
+| NVIDIA Parakeet TDT 0.6B v3 | 英语等 25 种欧洲语言的识别候选，包含时间戳；该版本语言列表不含中文 | [官方模型卡](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) |
+| 硅基流动 SenseVoiceSmall / TeleSpeechASR | HTTP 文件上传，接口返回文本；官方规格为单文件不超过 1 小时、50MB。无需预先托管音频 URL，价格和账户额度待核实 | [接口文档](https://docs.siliconflow.cn/docs/api/audio-transcriptions-post) |
+| Groq 托管 Whisper | 文件/URL 识别接口；Turbo 0.04 美元/小时，large-v3 0.111 美元/小时，存在单请求最低计费时长与文件限额 | [官方接口与价格](https://console.groq.com/docs/speech-to-text) |
+| 豆包录音文件识别极速版 | HTTP 同步返回，官方文档列 100MB、2 小时上限，传入音频 URL；价格需按具体产品核实 | [官方接口](https://docs.volcengine.com/docs/DoubaoVoice/recording-file-recognition-lite-http?lang=zh) |
+| 腾讯云 ASR 大模型 2.0 | 录音文件异步识别，提供中英及方言混合引擎；当日按量价格为 0.8 元/小时，免费额度适用引擎需以账户核实 | [产品](https://cloud.tencent.com/document/product/1093/35682)、[价格](https://cloud.tencent.com/document/product/1093/35686) |
+| ElevenLabs Scribe v2 | 多语种转写、说话人分离与词时间戳，支持术语提示；更适合将多人会议等需求纳入评估时比较 | [官方能力说明](https://elevenlabs.io/docs/overview/capabilities/speech-to-text) |
+
+现阶段用实际转写质量与修订负担筛选少量候选，不同时给生产代码接入上述所有服务。模型权重、推理运行时和托管服务是三个不同选择：例如托管 Whisper 可以省去本地环境，但不能据此推断其中文术语质量会优于同系列本地权重；文件级服务返回的时间戳也须验证后才能提高项目的来源精度。
+
+实际准备中 Hugging Face 与 PyTorch 初始下载链路较慢，改用 Qwen 在魔搭的官方原生权重、上海交大 PyTorch 镜像；wheel 与 PyTorch 官方索引公布的 SHA256 一致后才安装。独立环境的其余依赖从阿里云 PyPI 镜像安装。取消的下载分段位于忽略的 artifacts/wheels；自动审批拒绝其清理，暂时保留。最终四组真实推理全部完成，数据和质量观察分别见同日 validation.md / content-quality.md，不将环境下载时间计为模型推理时间。
