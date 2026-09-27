@@ -535,3 +535,17 @@ Windows CUDA 预检最初用 ctypes 默认 DLL 搜索方式，未使用用户配
 用户在阅读导出中发现残留的双星号。第六课 HTML 有六处，PDF 同样保留标记；问题集中在加粗范围的括号或引号紧邻外侧汉字。[CommonMark 的强调边界规则](https://spec.commonmark.org/0.31.2/#emphasis-and-strong-emphasis)会让这类标记无法开闭，原共享解析器没有中文适配。
 
 选择在共享解析器的 emphasis 分词后，仅放宽双星号位于汉字与标点之间的开闭资格，继续使用原有配对和嵌套处理。代码、转义、链接目标和公式由既有语法规则处理，避免全文正则替换误伤字面内容。扩展只影响 HTML/PDF 节点；Markdown 继续保留原字节，外部编辑器的边界空格写法记录在使用指南。旧产物保留，通过离线导出生成新的阅读副本。
+
+## 2026-09-27：低成本 ASR 选型与评估方案
+
+用户希望重新衡量本地识别和更简单的替代方案。先复用现有 profiling 工具完成同音频 CPU / GPU 与已存云端结果的对照，结果见 validation.md 和 content-quality.md 的同日记录。没有改动生产默认后端、增加依赖或适配器。
+
+候选顺序：有可靠同步字幕时通过现有 SRT/VTT 入口省去 ASR；这台已有 CUDA 环境的机器优先评估现有 faster-whisper large-v3-turbo；无需 GPU 的新候选为 SenseVoiceSmall INT8 / sherpa-onnx；需要进一步争取质量时评估开源 Qwen3-ASR-0.6B/1.7B。后两者仍需安装及同课实测，官方榜单不代替本项目验收。Qwen 官方提供 transformers 与 vLLM 后端，在当前 Windows 项目中相较已接入的 faster-whisper 会增加环境工作，不将它直接称为最简单方案。
+
+2026-09-27 检索的阿里云北京区单价：Qwen ASR 0.00022 元/秒，即 0.792 元/小时；Paraformer-v2 录音文件识别 0.00008 元/秒，即 0.288 元/小时，官方价格表列出每月 10 小时免费额度，账户实际适用情况待核实。Paraformer 可作为低费用云端候选，但录音文件接口需要可访问的音频 URL 与异步结果获取，不能仅改当前 Qwen 兼容接口的模型名。金额未计重试、存储及传输。
+
+下一轮质量实验建议固定四类已有课程的 8–12 个片段，总长约 10–15 分钟，覆盖中文数学、中文编程及中英混说、英文、普通中文。先回听形成独立参考稿，保留数字、否定、变量和术语；比较时统一约定大小写、标点及繁简规范化，中文 CER 与英文 WER 分开报告。另列关键术语命中、关键内容漏识/增写、长静音幻觉和人工修订分钟数。逐片报告并以参考字数/词数汇总，避免把口头重复的压缩与关键语义错误混成一个结论。
+
+性能同时记录加载、首次与后续转写、实时率、RSS/整卡显存和实际 API 用量。初轮固定真实音频切片，只比较识别器；如需调整 VAD 或切片长度，另做实验并保留原课时间映射。最终对最有希望的两种方案固定截图、图文模型与提示词生成少量讲义，检查错误是否传入概念、代码或公式，以及实际修订负担。人工真值完成前只报告差异，不以云端输出充当准确率真值，也不自动切换供应商。
+
+检索依据：[faster-whisper](https://github.com/SYSTRAN/faster-whisper)、[SenseVoice 的 sherpa-onnx Windows 支持](https://k2-fsa.github.io/sherpa/onnx/sense-voice/index.html)、[Qwen3-ASR 官方实现](https://github.com/QwenLM/Qwen3-ASR)、[阿里云价格](https://help.aliyun.com/zh/model-studio/model-pricing)、[Paraformer 文件接口](https://help.aliyun.com/zh/model-studio/paraformer-recorded-speech-recognition-restful-api)。
