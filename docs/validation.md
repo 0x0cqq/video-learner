@@ -350,4 +350,8 @@ CUDA 测量使用 RTX 4070 系列 12GB、CUDA 12/cuDNN 9、large-v3-turbo/int8_f
 
 整课运行 `convert <单课时缓存> --profile programming --asr-secret secrets/qwen.secret --secret secrets/deepseek.secret --output output/software-lesson07-full-20260929`，使用默认 DeepSeek 初稿与两轮独立复审，退出码 0，返回 `revisions/r002/notes.md`。CLI 实报：总用时 853.8 秒；Qwen ASR 212 片、212 请求、零重试、203.6 秒；截图扫描 2,991 帧，保留 297 张候选，150.9 秒；初稿 35/35 章、98 图、35 请求、零重试、208.4 秒；独立复审 84 请求、14 次重试、289.4 秒。最终 r002 选用 90 图。估算费用为 ASR 1.294480 元、DeepSeek 1.100453 元，合计 2.394933 元，以供应商账单为准。
 
-`tools/replay_conversion.py` 对 r001 和 r002 各自离线重放均通过，35 章；`tools/audit_coverage.py --revision r002` 完成候选、送图与配图覆盖审计，报告在忽略目录 `artifacts/evaluations/lesson07-20260929-coverage/`。这些检查不证明内容事实正确；逐章阅读和局部原帧／ASR 核对见[同日内容质量记录](content-quality.md#2026-09-29第七课需求和架构-2-质量审阅)。本轮未修改生产代码、依赖或配置，未运行 pytest／Ruff，也未执行 HTML／PDF 导出。
+`tools/replay_conversion.py` 对 r001 和 r002 各自离线重放均通过，35 章；`tools/audit_coverage.py --revision r002` 完成候选、送图与配图覆盖审计，报告在忽略目录 `artifacts/evaluations/lesson07-20260929-coverage/`。这些检查不证明内容事实正确；逐章阅读和局部原帧／ASR 核对见[同日内容质量记录](content-quality.md#2026-09-29第七课需求和架构-2-质量审阅)。转换当轮未修改生产代码、依赖或配置，未运行 pytest／Ruff；后续导出验证见下节。
+
+## 2026-09-29：第七课 r002 阅读版导出
+
+执行 `export output/software-lesson07-full-20260929 --output output/pdf/lesson07-r002-noto-20260929 --format html --format pdf --base r002 --pdf-font C:/Windows/Fonts/NotoSansSC-VF.ttf`，退出码 0，生成 `notes.html`、`notes.pdf` 及清单。首次使用默认微软雅黑字体导出时发现缺少“⇒”；改用本机 Noto Sans SC 后无字体缺字警告。最终 PDF 为 A4、86 页，未加密；文本提取检查 86 页均有内容，两处“⇒”位于第 15、16 页。全部页面渲染为 PNG 并查看缩略图，放大检查了首页、第 15、60、77、86 页，未见明显截断、重叠或缺字。HTML 解析检查有 90 张图片，均以内嵌数据形式保存，两处“⇒”保留。页面检查图保存在忽略目录 `artifacts/evaluations/lesson07-20260929-export-qa/`，首次缺字版归档在同级 `lesson07-20260929-default-font-warning/`。此次只导出已有 r002，未重新调用模型，也未运行 pytest／Ruff。
