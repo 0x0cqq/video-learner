@@ -341,3 +341,13 @@ CUDA 测量使用 RTX 4070 系列 12GB、CUDA 12/cuDNN 9、large-v3-turbo/int8_f
 四组配置均完成六窗，两次转写逐字一致，输出窗口元数据与原云端结果一致；原 WAV 直接只读使用。单段与批量的输出并非完全相同，1.7B 存在具有语义影响的差异，详见 [内容观察](content-quality.md#2026-09-27开源-qwen3-asr-内容观察)。未建立人工参考稿，没有测 CER/WER、整课质量或下游讲义质量。
 
 报告在忽略目录 `artifacts/evaluations/asr-20260927/qwen-*/`，汇总为 `qwen-comparison.json`、`qwen-comparison.md`。真实运行和 CLI 帮助通过；新工具的 Ruff 规则、格式与文档差异检查通过。生产代码、依赖锁与默认后端未变，没有重跑全套生产测试。
+
+## 2026-09-29：第七课《需求和架构 (2)》整课转换
+
+对客户端新缓存的单课时目录 `42305585529` 执行 `inspect --json --decode`，识别 BVID `BV1JGap6LE74`、H.264 1280×410 和 AAC，前中后抽查通过；未执行全片顺序解码。源目录只读，输出均放在项目忽略目录。
+
+先转换 00:00:00–00:03:00 小样本：1 章、7 片 Qwen ASR、9 张候选、r001 选图 4 张，初稿 1 次和两轮复审 2 次图文请求均成功；耗时 26.9 秒，估价 0.069137 元，产物为 `output/software-lesson07-smoke-20260929/`。
+
+整课运行 `convert <单课时缓存> --profile programming --asr-secret secrets/qwen.secret --secret secrets/deepseek.secret --output output/software-lesson07-full-20260929`，使用默认 DeepSeek 初稿与两轮独立复审，退出码 0，返回 `revisions/r002/notes.md`。CLI 实报：总用时 853.8 秒；Qwen ASR 212 片、212 请求、零重试、203.6 秒；截图扫描 2,991 帧，保留 297 张候选，150.9 秒；初稿 35/35 章、98 图、35 请求、零重试、208.4 秒；独立复审 84 请求、14 次重试、289.4 秒。最终 r002 选用 90 图。估算费用为 ASR 1.294480 元、DeepSeek 1.100453 元，合计 2.394933 元，以供应商账单为准。
+
+`tools/replay_conversion.py` 对 r001 和 r002 各自离线重放均通过，35 章；`tools/audit_coverage.py --revision r002` 完成候选、送图与配图覆盖审计，报告在忽略目录 `artifacts/evaluations/lesson07-20260929-coverage/`。这些检查不证明内容事实正确；逐章阅读和局部原帧／ASR 核对见[同日内容质量记录](content-quality.md#2026-09-29第七课需求和架构-2-质量审阅)。本轮未修改生产代码、依赖或配置，未运行 pytest／Ruff，也未执行 HTML／PDF 导出。
