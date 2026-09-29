@@ -35,7 +35,7 @@
 | 3. 候选画面 | `media/evidence.py:sample_frames()` 扫描变化，`register_frame()` 登记实际 PTS、时间、图片路径和哈希，形成 `FrameEvidence` | `.work/frame-scan.json`、`.work/frames.json` 与 `.work/frames/frame-*.png`；这些是候选完整帧 |
 | 4. 章节与模型前证据 | `notes/composition.py:plan_chapters()` 划分连续范围；`composition_input()` 从当前 `Notebook` 构造逐章证据包 | `.work/evidence.json` 保存整理前的转写、候选帧和章节计划；每章调用前写入 `.work/composition-inputs/ch-*.json`，包含实际证据包与图片身份 |
 | 5. 模型与草稿应用 | `providers/base.py:Provider.compose()` 取得 `Draft`；`notes/composition.py:apply_chapter_draft()` 校验并应用草稿，分配章节内的稳定块 ID | `.work/model-responses/<随机ID>.json` 保存完整返回的最终正文，包含可能未通过校验的响应；`.work/composition-drafts/ch-*.json` 只保存已采用草稿；`.work/composed.json` 逐章更新讲义状态 |
-| 6. 校验与发布 | `validate_notebook()` 检查时间、引用和图片；`exports:export_book()` 生成文稿与资源；`convert()` 复核源素材指纹后提交目录 | `notes.md`、`sources.md`、`review.md`、`notes.json`、`source.json`、`assets/`；`.work/versions/r001.generated.md` 保存生成字节快照，清单登记成功版本；`usage.json` 汇总本次用量 |
+| 6. 校验与发布 | `validate_notebook()` 检查时间、引用和图片；`exports:export_book()` 生成三种格式与资源；`convert()` 复核源素材指纹后提交目录 | `notes.md`、`notes.html`、`notes.pdf`、`sources.md`、`review.md`、`notes.json`、`source.json`、`export.json`、`assets/`；`.work/versions/r001.generated.md` 保存 Markdown 字节快照，清单登记成功版本；`usage.json` 汇总本次用量 |
 | 7. 独立复审 | `notes/reviewing.py:review_input()` 冻结基线和原证据；`Provider.review()` 返回逐图判断及局部修改；`apply_review_pass()` 确定性应用 | 默认写入独立 r002；`.work/reviews/` 保存复审基线、逐章输入和结果，可离线重放；原 r001 保留 |
 
 图文模型逐章串行运行。后一章的证据包可包含已完成前章的末尾，因此每章必须在实际调用前单独冻结输入。章节在转写后规划一次，启动时报告目标章长。ASR 与图文模型输出是外部结果；给定保存的转写、候选帧和已采用 `Draft` 后，章节应用、渲染及固定结果的离线核对由本地代码完成。失败目录保留诊断，不登记成功版本，也不作为 P0 断点恢复入口。
@@ -178,7 +178,7 @@ output/sample/
 
 ### 多格式阅读导出
 
-`workflows/exporting.py` 接收含 `notes.json`、当前 `notes.md` 和本地图片的版本目录；也可用工作目录加显式 `--base` 选择已登记版本。整个流程离线执行，输出到全新目录，不登记修订版本。转换和修订继续保存可编辑的 Markdown 版本。
+`convert` 和 `revise` 的每个成功版本默认从同一快照生成 Markdown、HTML、PDF；Markdown 与 JSON 是版本数据，版本清单核验 Markdown 快照和 `notes.json`，HTML/PDF 可重新导出。`workflows/exporting.py` 接收含 `notes.json`、当前 `notes.md` 和本地图片的版本目录；也可用工作目录加显式 `--base` 选择已登记版本。`export` 默认生成三种格式，可用重复的 `--format` 选择部分格式；整个流程离线执行，输出到全新目录，不登记修订版本。
 
 `exports/document.py:prepare_document()` 生成 `ExportDocument`：Notebook 元数据快照、正文/来源/疑点三个文档部分，以及已验证的本地图片映射。每部分同时保存原始 Markdown 字节和共享的 Markdown-it 语法节点，包含表格、代码、图片和公式。当前手改文稿优先于结构化正文，不能仅从旧 Notebook 重新生成全文。导出命令发现当前正文与基线快照不同，会在副本标记 `manual_unverified`；独立目录没有生成快照时，采用与 Notebook 重渲染结果的保守比较。输入索引保持不变。
 
@@ -188,11 +188,11 @@ output/sample/
 
 - Markdown 保存正文原字节、相对图片、来源及疑点文件，保留锚点与换行。
 - HTML 将图片编码内嵌为单文件，用本地 [latex2mathml](https://github.com/roniemartinez/latex2mathml) 生成 MathML，正文后附来源与疑点；支持屏幕宽度变化，无在线脚本或字体依赖。
-- PDF 使用可选 ReportLab/Matplotlib 依赖，嵌入中文 TrueType 字体，生成 A4 分页、内部目录链接、完整截图及附录。[长表重复表头](https://docs.reportlab.com/reportlab/userguide/ch7_tables/)，代码换行；公式采用 [Mathtext 子集](https://matplotlib.org/stable/users/explain/text/mathtext.html)。超出支持范围时保留标记清楚的 LaTeX 原文，不保证与 HTML 的公式表现一致。
+- PDF 使用常规依赖中的 ReportLab/Matplotlib，嵌入中文 TrueType 字体，生成 A4 分页、内部目录链接、完整截图及附录。[长表重复表头](https://docs.reportlab.com/reportlab/userguide/ch7_tables/)，代码换行；公式采用 [Mathtext 子集](https://matplotlib.org/stable/users/explain/text/mathtext.html)。超出支持范围时保留标记清楚的 LaTeX 原文，不保证与 HTML 的公式表现一致。
 
-HTML/PDF 将手写 HTML 静态化为文字、图片和锚点；代码围栏仍作为字面内容。图片须为版本内或已登记证据中的有效位图，拒绝外部 URL、越界和缺失依赖；链接仅保留文内、普通网页和邮件地址。HTML 附加限制资源加载的 CSP。每次导出记录 `export.json` 的格式及排版警告，并保留 `notes.json`、`source.json`；HTML/PDF 单文件本身即可阅读。可编辑 Markdown 导出目录能再次作为导出输入，继续 CLI 修订仍需原工作目录。
+HTML/PDF 将手写 HTML 静态化为文字、图片和锚点；代码围栏仍作为字面内容。图片须为版本内或已登记证据中的有效位图，拒绝外部 URL、越界和缺失依赖；链接仅保留文内、普通网页和邮件地址。HTML 附加限制资源加载的 CSP。版本和独立导出均用 `export.json` 记录格式及排版警告，并保留 `notes.json`、`source.json`；HTML/PDF 单文件本身即可阅读。手改 Markdown 后再次 `export` 读取当前正文；继续 CLI 修订仍需原工作目录。
 
-输出使用目录锁和相邻临时目录；全部格式完成且输入文件未变后才 rename 发布。任一适配器失败均清理暂存，不留下部分成功目录，不覆盖已有输出。公式临时文件和 PDF 文件句柄在成功或失败后均关闭清理。
+独立 `export` 使用目录锁和相邻临时目录；全部格式完成且输入文件未变后才 rename 发布。任一适配器失败均清理暂存，不留下部分成功目录，不覆盖已有输出。转换和修订沿用各自的版本提交与失败诊断流程。公式临时文件和 PDF 文件句柄在成功或失败后均关闭清理。
 
 ## 6. 配置、提交与失败
 

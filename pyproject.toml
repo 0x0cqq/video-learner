@@ -12,11 +12,13 @@ dependencies = [
     "av>=16",
     "latex2mathml>=3.81.1",
     "markdown-it-py>=4.2.0",
+    "matplotlib>=3.11.2",
     "mdit-py-plugins>=0.6.1",
     "numpy>=2",
     "openai>=3.8.0",
     "pillow>=11",
     "pydantic>=2.11",
+    "reportlab>=5.0.1",
     "rich>=14",
     "typer>=0.16",
 ]
@@ -32,11 +34,6 @@ local-cuda = [
     "nvidia-cublas-cu12>=12,<13",
     "nvidia-cudnn-cu12>=9,<10",
 ]
-pdf = [
-    "matplotlib>=3.11.2",
-    "reportlab>=5.0.1",
-]
-
 [dependency-groups]
 dev = [
     "nvidia-ml-py>=13.610.43",

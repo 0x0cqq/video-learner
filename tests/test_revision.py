@@ -49,6 +49,7 @@ def test_revision_preserves_nullable_baseline_settings(video, tmp_path, monkeypa
         model_provider="qwen",
     )
     assert (destination / "notes.md").is_file()
+    assert (destination / "notes.html").is_file() and (destination / "notes.pdf").is_file()
     assert replay_revision(root, "r002").chapters[0].status == "completed"
 
 

@@ -6,6 +6,7 @@ import pytest
 from video_learner.common.config import Config
 from video_learner.common.core import InputError, TaskError
 from video_learner.common.schemas import Draft, DraftBlock, FrameAssessment, Notebook, ReviewResult
+from video_learner.common.storage import read_json
 from video_learner.notes.rendering import (
     MARKDOWN,
     AnchorConflict,
@@ -87,6 +88,9 @@ def test_offline_conversion_exports_references_and_versions(converted):
     root, _ = converted
     book = Notebook.model_validate_json((root / "notes.json").read_text(encoding="utf-8"))
     data = (root / "notes.md").read_bytes()
+    assert (root / "notes.html").is_file()
+    assert (root / "notes.pdf").is_file()
+    assert read_json(root / "export.json")["formats"] == ["markdown", "html", "pdf"]
     assert len(expected_spans(data, book)) == 3
     for reference in image_dependencies(data):
         assert (root / reference).is_file()
@@ -245,6 +249,8 @@ def test_force_cli_replaces_old_output(converted, monkeypatch):
     assert result.exit_code == 0, result.output
     assert not old.exists()
     assert (root / "notes.md").is_file()
+    assert (root / "notes.html").is_file() and (root / "notes.pdf").is_file()
+    assert "notes.html" in result.stdout and "notes.pdf" in result.stdout
 
 
 def test_force_preserves_output_when_preflight_or_lock_fails(converted):

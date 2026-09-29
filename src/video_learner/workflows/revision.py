@@ -21,6 +21,7 @@ from video_learner.common.storage import (
     write_json,
 )
 from video_learner.exports import export_book
+from video_learner.exports.pdf import font_path
 from video_learner.media.evidence import register_frame
 from video_learner.media.io import inspect_source
 from video_learner.notes.composition import (
@@ -129,6 +130,7 @@ def revise(
     provider: Provider | None = None,
     model_provider: str | None = None,
     model: str | None = None,
+    pdf_font: Path | None = None,
 ) -> Path:
     """在显式基线上修订单章或单块，提交包含图片的新独立版本并返回目录。
 
@@ -143,6 +145,7 @@ def revise(
         raise InputError("精确换图只接受 --block，不能同时指定文字修订要求")
     if not image_operation and not (instruction and instruction.strip()):
         raise InputError("文字修订必须提供 --instruction")
+    font_path(pdf_font)
     root = workdir.resolve()
     if not root.is_dir():
         raise InputError("工作目录不存在")
@@ -309,7 +312,7 @@ def revise(
                     )
                 new_current = current[: span.start] + replacement + current[span.end :]
                 validate_notebook(book, root)
-                export_book(book, root, staging, new_current, base=baseline)
+                export_book(book, root, staging, new_current, base=baseline, pdf_font=pdf_font)
                 request_summary = instruction or f"指定帧 {at_us}"
                 atomic_bytes(
                     contained(staging, "changes.md"),

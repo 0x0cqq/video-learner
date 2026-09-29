@@ -20,6 +20,7 @@ from video_learner.common.storage import (
 )
 from video_learner.common.usage import summarize_usage
 from video_learner.exports import export_book
+from video_learner.exports.pdf import font_path
 from video_learner.media.evidence import load_subtitles, sample_frames, save_transcript
 from video_learner.media.io import inspect_source, source_file, track_of
 from video_learner.notes.composition import (
@@ -85,6 +86,7 @@ def convert(
     provider: Provider | None = None,
     usage_report: Callable[[dict], None] | None = None,
     force: bool = False,
+    pdf_font: Path | None = None,
 ) -> Path:
     """编排单视频转换，在独占锁内提取证据、组织章节并提交新输出目录。
 
@@ -93,6 +95,7 @@ def convert(
     force 在预检通过并持锁后删除原输出；后续转换失败不会恢复被删除的旧结果。
     失败保留诊断产物并抛异常，这些文件不代表可恢复任务或可修订的成功版本。
     """
+    font_path(pdf_font)
     source_path = source_path.resolve()
     target = output_path(source_path, output, force=force)
     source = inspect_source(source_path)
@@ -282,7 +285,7 @@ def convert(
             )
             with events.stage("validate_export"):
                 validate_notebook(book, staging)
-                current = export_book(book, staging, staging)
+                current = export_book(book, staging, staging, pdf_font=pdf_font)
                 atomic_bytes(contained(staging, ".work/versions/r001.generated.md"), current)
                 manifest["status"] = (
                     "completed"
@@ -309,7 +312,14 @@ def convert(
 
                 events.path = contained(target, ".work/logs/events.jsonl")
                 try:
-                    return review_version(target, "r001", config, events, active_provider)
+                    return review_version(
+                        target,
+                        "r001",
+                        config,
+                        events,
+                        active_provider,
+                        pdf_font=pdf_font,
+                    )
                 except (TaskError, InputError) as exc:
                     raise TaskError(f"初稿 r001 已保存在 {target}，独立复审未完成：{exc}") from exc
             return target

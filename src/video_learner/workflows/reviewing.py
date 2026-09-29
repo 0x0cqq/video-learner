@@ -18,6 +18,7 @@ from video_learner.common.storage import (
 )
 from video_learner.common.usage import summarize_usage
 from video_learner.exports import export_book
+from video_learner.exports.pdf import font_path
 from video_learner.media.io import inspect_source
 from video_learner.notes.composition import validate_notebook
 from video_learner.notes.rendering import (
@@ -45,8 +46,10 @@ def review(
     reviewers: dict[str, ReviewFunction] | None = None,
     progress: Callable[[dict], None] | None = None,
     usage_report: Callable[[dict], None] | None = None,
+    pdf_font: Path | None = None,
 ) -> Path:
     """复用原始证据复审整份讲义或指定章节；持有与转换、修订相同的目录锁。"""
+    font_path(pdf_font)
     root = workdir.resolve()
     if not contained(root, ".work/manifest.json").is_file():
         raise InputError("此目录没有本工具的工作清单")
@@ -61,7 +64,16 @@ def review(
         )
         events = Events(root, progress)
         try:
-            destination = review_version(root, base, config, events, provider, section, reviewers)
+            destination = review_version(
+                root,
+                base,
+                config,
+                events,
+                provider,
+                section,
+                reviewers,
+                pdf_font=pdf_font,
+            )
         finally:
             report = summarize_usage(events.usage_events, config)
             write_json(contained(root, f".work/review-usage/{events.run_id}.json"), report)
@@ -79,6 +91,7 @@ def review_version(
     provider: Provider | None = None,
     section: str | None = None,
     reviewers: dict[str, ReviewFunction] | None = None,
+    pdf_font: Path | None = None,
 ) -> Path:
     """在调用方持锁时核验基线、冻结独立复审输入，提交新版本；失败保留原版本。"""
     manifest, baseline, book, snapshot = load_baseline(root, base)
@@ -186,7 +199,7 @@ def review_version(
                     completed += 1
             events.emit("review", "progress", total=total, completed=completed)
             validate_notebook(book, root)
-            export_book(book, root, staging, current, base=baseline)
+            export_book(book, root, staging, current, base=baseline, pdf_font=pdf_font)
             atomic_bytes(staging / "changes.md", "\n".join(changes).encode("utf-8"))
             if digest(current_path) != current_hash:
                 report = conflict_report(root, "复审期间基线被再次编辑", current)

@@ -55,7 +55,7 @@ def test_chinese_strong_keeps_literal_and_standard_markdown():
 
 
 def pdf_font():
-    """PDF 用例仅在已安装可选依赖与中文字体时运行，不下载字体。"""
+    """PDF 用例使用常规依赖与本机中文字体，不下载字体。"""
     pytest.importorskip("reportlab")
     pytest.importorskip("matplotlib")
     from video_learner.exports.pdf import font_path
@@ -180,3 +180,14 @@ def test_export_explicit_version_and_invalid_format(converted, tmp_path):
     assert (target / "notes.md").read_bytes() == (root / "notes.md").read_bytes()
     with pytest.raises(InputError, match="导出格式"):
         export(root, tmp_path / "wrong", ["docx"])
+
+
+def test_export_cli_defaults_to_all_formats(converted, tmp_path):
+    """省略格式选项时，阅读副本一次生成三种格式并保留当前 Markdown。"""
+    root, _ = converted
+    target = tmp_path / "default-reading"
+    result = CliRunner().invoke(app, ["export", str(root), "--output", str(target)])
+    assert result.exit_code == 0, result.output
+    assert (target / "notes.md").read_bytes() == (root / "notes.md").read_bytes()
+    assert (target / "notes.html").is_file() and (target / "notes.pdf").is_file()
+    assert read_json(target / "export.json")["formats"] == ["markdown", "html", "pdf"]

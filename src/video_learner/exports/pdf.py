@@ -18,6 +18,7 @@ def font_path(explicit: Path | None = None) -> Path:
         [explicit]
         if explicit
         else [
+            Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"),
             Path("C:/Windows/Fonts/msyh.ttc"),
             Path("C:/Windows/Fonts/simsun.ttc"),
             Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
@@ -59,7 +60,7 @@ def render_pdf(
             TableStyle,
         )
     except ImportError as exc:
-        raise InputError("PDF 依赖未安装，请运行 uv sync --extra pdf") from exc
+        raise InputError("PDF 依赖未安装，请运行 uv sync --locked") from exc
 
     path = font_path(font)
     try:

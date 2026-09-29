@@ -89,6 +89,8 @@ def test_default_conversion_returns_reviewed_version(video, tmp_path):
     root = tmp_path / "reviewed"
     destination = convert(video, root, Config(), subtitle=subtitle, provider=EditingProvider())
     assert destination == root / "revisions/r002"
+    assert all((root / name).is_file() for name in ("notes.md", "notes.html", "notes.pdf"))
+    assert all((destination / name).is_file() for name in ("notes.md", "notes.html", "notes.pdf"))
     assert "修正后的" in (destination / "notes.md").read_text(encoding="utf-8")
     assert "修正后的" not in (root / "notes.md").read_text(encoding="utf-8")
     replay_conversion(root)

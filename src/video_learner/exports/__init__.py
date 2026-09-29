@@ -9,6 +9,7 @@ from video_learner.common.storage import write_json
 from video_learner.exports.document import ExportDocument, prepare_document
 
 type ExportFormat = Literal["markdown", "html", "pdf"]
+DEFAULT_FORMATS: tuple[ExportFormat, ...] = ("markdown", "html", "pdf")
 
 
 def write_document(
@@ -40,8 +41,13 @@ def export_book(
     markdown: bytes | None = None,
     *,
     base: Path | None = None,
+    pdf_font: Path | None = None,
 ) -> bytes:
-    """转换和修订保存可继续编辑的 Markdown 版本及结构化索引。"""
+    """从同一可编辑快照保存三种格式及结构化索引。"""
     document = prepare_document(book, evidence_root, markdown, base=base)
-    write_document(document, destination, ["markdown"])
+    warnings = write_document(document, destination, list(DEFAULT_FORMATS), pdf_font=pdf_font)
+    write_json(
+        contained(destination, "export.json"),
+        {"formats": list(DEFAULT_FORMATS), "title": book.title, "warnings": warnings},
+    )
     return document.markdown

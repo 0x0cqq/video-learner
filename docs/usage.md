@@ -38,9 +38,9 @@ uv run video-learner convert "D:\media\programming" --start 00:45:00 --end 00:55
 
 默认使用阿里云 Qwen ASR，按原视频时间提取 16 kHz 单声道音频；也可用 `--asr-backend local --asr-device cpu|cuda` 选择本地识别，见下方安装配置。
 
-生成的根目录对应 r001：`notes.md`、`assets/`、`sources.md`、`review.md`、`source.json`、`transcript.jsonl`、`notes.json`、`usage.json`。正文保留连贯解释与必要图片，图注可省略；来源区间、证据、修订 ID 和手改同步状态集中在 `sources.md`，具体内容疑点列在 `review.md`。`.work/` 保存本机来源、指纹、原帧、音频窗口、生成快照、版本清单与日志。
+生成的根目录对应 r001：`notes.md`、`notes.html`、`notes.pdf`、`assets/`、`sources.md`、`review.md`、`source.json`、`transcript.jsonl`、`notes.json`、`export.json`、`usage.json`。正文保留连贯解释与必要图片，图注可省略；来源区间、证据、修订 ID 和手改同步状态集中在 `sources.md`，具体内容疑点列在 `review.md`。`.work/` 保存本机来源、指纹、原帧、音频窗口、生成快照、版本清单与日志。
 
-转换默认在初稿 r001 完成后执行独立复审，输出 `revisions/r002/notes.md`，终端最后返回该路径。复审先检查选图、位置和图注，再检查正文保真、跨章承接和讲义文体；具体改动见新版本的 `changes.md`。初稿与原始证据保留。`--no-review` 或 TOML `review_pass=false` 只生成初稿；`max_calls` 是初稿与复审共用的图文调用上限，复审增加请求和费用。复审失败时初稿仍可阅读，命令报告失败并保留诊断。
+转换默认在初稿 r001 完成后执行独立复审，输出 `revisions/r002/`，终端最后返回复审版的三个文件路径。复审先检查选图、位置和图注，再检查正文保真、跨章承接和讲义文体；具体改动见新版本的 `changes.md`。初稿与原始证据保留。`--no-review` 或 TOML `review_pass=false` 只生成初稿；`max_calls` 是初稿与复审共用的图文调用上限，复审增加请求和费用。复审失败时初稿仍可阅读，命令报告失败并保留诊断。转换及修订可用 `--pdf-font` 指定可嵌入的中文 TTF/TTC 字体。
 
 ## 云端语音识别
 
@@ -150,7 +150,7 @@ uv run video-learner revise ".\output\sample" --base r002 --block fig-001-002 --
 
 修订只接受当前数据版本的工作目录，格式要求见[数据契约](technical-design.md#3-固定证据提取)。旧格式输出仍可阅读、复制，但不能直接继续修订；请重新转换到独立目录。
 
-修订生成 `revisions/r002/` 等独立目录，包含本版 Markdown、图片、结构化索引、来源、疑点和 `changes.md`，旧文件保持不变。复制任一版本的 `notes.md` 和 `assets/` 即可阅读正文；需要保留来源与疑点链接时同时复制 `sources.md` 和 `review.md`。自加图片在其他相对目录时一并复制该目录。
+修订生成 `revisions/r002/` 等独立目录，包含本版 Markdown、HTML、PDF、图片、结构化索引、来源、疑点和 `changes.md`，旧文件保持不变。复制任一版本的 `notes.md` 和 `assets/` 即可阅读正文；需要保留来源与疑点链接时同时复制 `sources.md` 和 `review.md`。自加图片在其他相对目录时一并复制该目录。
 
 ## 失败与检查
 
@@ -213,14 +213,14 @@ DeepSeek 默认使用配置中的 `deepseek-flash`。默认 `deepseek_context="h
 `export` 从已有版本的当前 `notes.md` 导出，保留手改文字和本地图片，不调用模型，也无需原视频或凭据。输入可以是独立版本/校订稿目录；若指定 `--base`，则输入工作目录并显式选择版本。输出必须是全新目录。
 
 ```powershell
-# 从工作目录选择复审版，一次导出 Markdown 和离线 HTML
-uv run video-learner export ".\output\my-notes" --base r002 --format markdown --format html --output ".\output\reading"
+# 从工作目录选择复审版，默认导出三种格式
+uv run video-learner export ".\output\my-notes" --base r002 --output ".\output\reading"
 
-# 直接读取可携带的版本目录，安装/启用可选 PDF 依赖后导出
-uv run --extra pdf video-learner export ".\output\my-notes\revisions\r002" --format pdf --output ".\output\reading-pdf"
+# 直接读取版本目录，只导出 PDF
+uv run video-learner export ".\output\my-notes\revisions\r002" --format pdf --output ".\output\reading-pdf"
 ```
 
-`--format` 可重复使用，支持 `markdown`、`html`、`pdf`，省略时为 Markdown。PDF 依赖也可提前用 `uv sync --extra pdf` 安装，随后以 `uv run --no-sync` 执行；若同时使用本地 ASR/CUDA，保留对应 extra 或用 `uv sync --all-extras` 安装全部可选依赖。
+`--format` 可重复使用，支持 `markdown`、`html`、`pdf`，省略时生成三种格式。PDF 排版依赖已包含在常规 `uv sync --locked` 安装中；本地 ASR/CUDA 仍按对应 extra 安装。
 
 | 格式 | 产物与阅读方式 |
 | --- | --- |
@@ -228,13 +228,13 @@ uv run --extra pdf video-learner export ".\output\my-notes\revisions\r002" --for
 | HTML | `notes.html`，图片内嵌、来源和疑点在附录；现代浏览器直接离线打开，公式为原生 MathML |
 | PDF | `notes.pdf`，嵌入字体和图片，A4 分页、长表重复表头、目录链接和来源/疑点附录；适合阅读及打印 |
 
-三种格式共享当前文档快照，布局按用途分别处理。PDF 默认使用 Windows 微软雅黑或宋体，找不到时可指定 `--pdf-font "D:\fonts\Chinese.ttf"`（TTF/TTC TrueType 字体）；其他系统需提供可嵌入且覆盖中文的字体。PDF 公式支持 Mathtext 子集，无法排版的公式显示带标记的 LaTeX 原文；字体缺字或公式转换问题同时在 CLI 和 `export.json` 提示。
+三种格式共享当前文档快照，布局按用途分别处理。PDF 在 Windows 优先使用 Noto Sans SC，其次微软雅黑或宋体；找不到时可指定 `--pdf-font "D:\fonts\Chinese.ttf"`（TTF/TTC TrueType 字体），其他系统需提供可嵌入且覆盖中文的字体。PDF 公式支持 Mathtext 子集，无法排版的公式显示带标记的 LaTeX 原文；字体缺字或公式转换问题同时在 CLI 和 `export.json` 提示。
 
 HTML/PDF 支持汉字紧邻括号、引号的双星号加粗，例如 `体现**术语（term）**的含义`。Markdown 文件保留原文；在采用严格 CommonMark 的外部编辑器中，可写成 `体现 **术语（term）** 的含义`，用空格明确加粗边界。
 
 每个导出目录保存 `notes.json`、`source.json` 和 `export.json`。HTML/PDF 单文件可单独携带；再次导出需要 Markdown、索引和图片一起保留。正文与索引不同步时，来源附录标记手改未核对。手写 HTML 仅保留静态文字、图片和锚点；任意脚本或样式不会运行，代码示例保留原文。
 
-导出失败不会发布部分文件，源目录及已有输出保持不变。`export` 生成阅读副本，不产生 r003 等修订版本；修改讲义后可重新导出到新目录。继续执行 `revise` 使用原工作目录和明确基线。
+Markdown 与 JSON 是版本数据；版本目录中的 HTML/PDF 记录生成当时的阅读快照，直接修改阅读副本不会进入后续修订。手改 `notes.md` 后用 `export` 导出当前正文到新目录。导出失败不会发布部分文件，源目录及已有输出保持不变。`export` 不产生 r003 等修订版本；继续执行 `revise` 使用原工作目录和明确基线。
 
 ## 低成本审阅与独立校订稿
 
@@ -263,6 +263,6 @@ uv run --no-sync python tools/replay_conversion.py output/sample --revision r002
 uv run --no-sync python tools/export_review.py output/sample artifacts/review/edited.json --output output/sample-reviewed
 ```
 
-该开发工具不调用模型，要求原证据、时间与章节范围保持不变，全部章节完成并通过引用校验；基线 Markdown 有手改时先停止，避免遗漏手改。输出为独立的 notes.md、assets、sources.md、review.md 与结构化索引，保留原基线。此阅读副本不登记 convert/revise 版本；继续使用 CLI 修订成功转换基线时，仍按原 revise 流程操作。
+该开发工具不调用模型，要求原证据、时间与章节范围保持不变，全部章节完成并通过引用校验；基线 Markdown 有手改时先停止，避免遗漏手改。输出为独立的 notes.md、notes.html、notes.pdf、assets、sources.md、review.md 与结构化索引，保留原基线。此阅读副本不登记 convert/revise 版本；继续使用 CLI 修订成功转换基线时，仍按原 revise 流程操作。
 
 四课审阅的具体问题、处理结果与当次剩余疑点见[历史内容质量记录](content-quality.md)。

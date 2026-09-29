@@ -16,7 +16,7 @@ from video_learner.terminal import TerminalProgress
 app = typer.Typer(
     no_args_is_help=False,
     invoke_without_command=True,
-    help="将单视频整理为可核对、可修订的讲义，并导出 Markdown、HTML 或 PDF。",
+    help="将单视频整理为可核对、可修订的讲义，默认生成 Markdown、HTML 和 PDF。",
 )
 console = Console(stderr=True)
 
@@ -84,6 +84,9 @@ def convert_command(
     allow_ai_additions: Annotated[
         bool | None, typer.Option("--allow-ai-additions/--no-ai-additions")
     ] = None,
+    pdf_font: Annotated[
+        Path | None, typer.Option(help="PDF 中文 TTF/TTC 字体，Windows 优先 Noto Sans SC")
+    ] = None,
     verbose: bool = typer.Option(False, "--verbose", help="显示详细阶段事件"),
 ) -> None:
     """转换完整视频或 [start,end) 片段，输出图文讲义。"""
@@ -118,11 +121,24 @@ def convert_command(
                 progress=progress,
                 usage_report=reports.append,
                 force=force,
+                pdf_font=pdf_font,
             )
     finally:
         for report in reports:
             display_usage(report)
-    typer.echo(str(path / "notes.md"))
+    display_outputs(path)
+
+
+def display_outputs(path: Path) -> None:
+    """显示已发布版本的文件路径与排版警告。"""
+    from video_learner.common.storage import read_json
+
+    report = read_json(path / "export.json")
+    for warning in report["warnings"]:
+        console.print(warning, style="yellow", markup=False)
+    names = {"markdown": "notes.md", "html": "notes.html", "pdf": "notes.pdf"}
+    for name in report["formats"]:
+        typer.echo(str(path / names[name]))
 
 
 def display_usage(report: dict) -> None:
@@ -176,6 +192,9 @@ def revise_command(
     allow_ai_additions: Annotated[
         bool | None, typer.Option("--allow-ai-additions/--no-ai-additions")
     ] = None,
+    pdf_font: Annotated[
+        Path | None, typer.Option(help="PDF 中文 TTF/TTC 字体，Windows 优先 Noto Sans SC")
+    ] = None,
     verbose: bool = typer.Option(False, "--verbose", help="显示详细阶段事件"),
 ) -> None:
     """基于指定版本修订目标章节/段落、精确换图或独立复审。"""
@@ -200,11 +219,12 @@ def revise_command(
                     model=model,
                     progress=progress,
                     usage_report=reports.append,
+                    pdf_font=pdf_font,
                 )
         finally:
             for report in reports:
                 display_usage(report)
-        typer.echo(str(path / "notes.md"))
+        display_outputs(path)
         return
     with TerminalProgress(console, verbose) as progress:
         path = revise(
@@ -220,8 +240,9 @@ def revise_command(
             model=model,
             allow_ai_additions=allow_ai_additions,
             progress=progress,
+            pdf_font=pdf_font,
         )
-    typer.echo(str(path / "notes.md"))
+    display_outputs(path)
 
 
 @app.command("export")
@@ -229,18 +250,19 @@ def export_command(
     source: Annotated[Path, typer.Argument(help="含 notes.json/notes.md 的讲义目录或工作目录")],
     output: Annotated[Path, typer.Option(help="新的导出目录，保留原版本")],
     formats: Annotated[
-        list[str] | None, typer.Option("--format", help="markdown/html/pdf，可重复指定")
+        list[str] | None, typer.Option("--format", help="markdown/html/pdf，可重复指定；默认全部")
     ] = None,
     base: Annotated[str | None, typer.Option(help="从工作目录选择显式版本，如 r002")] = None,
     pdf_font: Annotated[
-        Path | None, typer.Option(help="PDF 中文 TTF/TTC 字体，Windows 默认微软雅黑")
+        Path | None, typer.Option(help="PDF 中文 TTF/TTC 字体，Windows 优先 Noto Sans SC")
     ] = None,
 ) -> None:
     """将已有讲义导出为阅读副本，不调用模型。"""
     from video_learner.common.storage import read_json
+    from video_learner.exports import DEFAULT_FORMATS
     from video_learner.workflows.exporting import export
 
-    formats = formats or ["markdown"]
+    formats = formats if formats is not None else list(DEFAULT_FORMATS)
     target = export(source, output, formats, base=base, pdf_font=pdf_font)
     for warning in read_json(target / "export.json")["warnings"]:
         console.print(warning, style="yellow", markup=False)

@@ -355,3 +355,7 @@ CUDA 测量使用 RTX 4070 系列 12GB、CUDA 12/cuDNN 9、large-v3-turbo/int8_f
 ## 2026-09-29：第七课 r002 阅读版导出
 
 执行 `export output/software-lesson07-full-20260929 --output output/pdf/lesson07-r002-noto-20260929 --format html --format pdf --base r002 --pdf-font C:/Windows/Fonts/NotoSansSC-VF.ttf`，退出码 0，生成 `notes.html`、`notes.pdf` 及清单。首次使用默认微软雅黑字体导出时发现缺少“⇒”；改用本机 Noto Sans SC 后无字体缺字警告。最终 PDF 为 A4、86 页，未加密；文本提取检查 86 页均有内容，两处“⇒”位于第 15、16 页。全部页面渲染为 PNG 并查看缩略图，放大检查了首页、第 15、60、77、86 页，未见明显截断、重叠或缺字。HTML 解析检查有 90 张图片，均以内嵌数据形式保存，两处“⇒”保留。页面检查图保存在忽略目录 `artifacts/evaluations/lesson07-20260929-export-qa/`，首次缺字版归档在同级 `lesson07-20260929-default-font-warning/`。此次只导出已有 r002，未重新调用模型，也未运行 pytest／Ruff。
+
+## 2026-09-29：成功版本默认三格式
+
+改为 `convert`、独立复审和 `revise` 的成功版本直接生成 Markdown、HTML、PDF；`export` 省略 `--format` 时生成三种格式，显式选择仍保留。自造媒体和确定性模型替身的专项测试 67 项通过，全套离线测试 134 项通过；覆盖初稿、自动复审版、修订版及 CLI 默认导出。`uv lock --check`、`ruff check .`、`ruff format --check .` 和 `git diff --check` 通过。`uv tree --no-dev --depth 1` 显示 Matplotlib、ReportLab 为常规依赖。CLI 帮助显示 `--pdf-font`。本次没有对第七课重跑转换或模型；原有输出不会自动补齐新版本文件。

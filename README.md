@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-P0 的 `inspect`、`convert`、`revise`、`export` 已实现。转换默认保存初稿 r001，再依次执行图文对应、讲义内容两轮独立复审，生成 `revisions/r002/notes.md`；CLI 返回复审版路径。可配置复审顺序、自定义规则和只报告模式，见[独立复审](docs/usage.md#独立复审)。局部修改保留旧版本及非目标手改内容。自动复审仍有漏检和误改，关键内容需要对照原课核对。语音识别默认使用阿里云 Qwen，可显式选择本地 CPU/CUDA；图文整理默认使用 DeepSeek，也可选择 Qwen。
+P0 的 `inspect`、`convert`、`revise`、`export` 已实现。转换默认保存初稿 r001，再依次执行图文对应、讲义内容两轮独立复审，生成 `revisions/r002/`；每个成功版本同时提供 `notes.md`、`notes.html`、`notes.pdf`，CLI 返回最终版的三个路径。Markdown 与 JSON 是版本数据，HTML/PDF 是可重新导出的阅读副本。可配置复审顺序、自定义规则和只报告模式，见[独立复审](docs/usage.md#独立复审)。局部修改保留旧版本及非目标手改内容。自动复审仍有漏检和误改，关键内容需要对照原课核对。语音识别默认使用阿里云 Qwen，可显式选择本地 CPU/CUDA；图文整理默认使用 DeepSeek，也可选择 Qwen。
 
 新生成的转换和文字修订会保存模型调用前的证据输入与已采用草稿，可只读核对固定模型结果下的生成过程。当前行为与数据边界见[技术设计](docs/technical-design.md)，运行方法见[使用指南](docs/usage.md)，已执行验证及内容质量限制见[历史验证记录](docs/validation.md)。
 
@@ -44,10 +44,9 @@ uv run video-learner convert "D:\media\lesson.mp4" --asr-secret ".\secrets\aliyu
 导出现有讲义无需模型或原视频；各格式共享文档快照，按阅读方式分别排版：
 
 ```powershell
-uv run video-learner export ".\output\my-notes" --base r002 --format html --output ".\output\my-notes-html"
-uv run --extra pdf video-learner export ".\output\my-notes" --base r002 --format pdf --output ".\output\my-notes-pdf"
+uv run video-learner export ".\output\my-notes" --base r002 --output ".\output\my-notes-reading"
 ```
 
-可重复传入 `--format` 一次导出多个格式，详见[导出阅读副本](docs/usage.md#导出阅读副本)。
+`export` 默认生成三种格式；可重复传入 `--format` 只选择部分格式，详见[导出阅读副本](docs/usage.md#导出阅读副本)。
 
 真实视频位于仓库外；`output/`、`artifacts/`、`secrets/` 和模型均不提交。每个成功版本的 `notes.md` 和 `assets/` 可一起复制；继续修订须保留完整工作目录。
