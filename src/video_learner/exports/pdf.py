@@ -233,6 +233,9 @@ def render_pdf(
                 )
                 markup = inline(children)
                 if markup:
+                    # 行内公式是无文字的图片片段；标准断行按图片宽度换行，避免 CJK 对空字符求 ord。
+                    if "<img " in markup:
+                        style.wordWrap = None
                     result.append(Paragraph(markup, style, bulletText=bullet))
                     bullet = None
                 for image in (n for n in node.walk() if n.type == "image"):

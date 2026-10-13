@@ -2,16 +2,19 @@
 
 import re
 import unicodedata
+from copy import copy
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from markdown_it import MarkdownIt
+from markdown_it.rules_block import StateBlock
 from markdown_it.rules_inline import emphasis
 from markdown_it.rules_inline.state_inline import StateInline
 from markdown_it.token import Token
 from mdit_py_plugins.dollarmath import dollarmath_plugin
+from mdit_py_plugins.dollarmath.index import math_block_dollar
 from PIL import Image
 
 from video_learner.common.core import InputError, contained
@@ -50,12 +53,33 @@ def is_han(character: str) -> bool:
     )
 
 
+def display_math(state: StateBlock, start_line: int, end_line: int, silent: bool) -> bool:
+    """识别可中断段落的显示公式；插件会写入探测状态，静默检查使用独立状态与 token 列表。"""
+    target = copy(state) if silent else state
+    if silent:
+        target.tokens = []
+    matched = math_block_dollar(allow_labels=False, allow_blank_lines=True)(
+        target, start_line, end_line, False
+    )
+    if matched and not silent:
+        # getLines 按容器状态去掉引用/列表前缀；插件的原始字符串切片会把这些前缀当公式字符。
+        content = target.getLines(start_line, target.line, target.blkIndent, False).strip()
+        target.tokens[-1].content = content[2:-2]
+    return matched
+
+
 def parser() -> MarkdownIt:
     """共享表格、公式与中文加粗语法；代码和转义字面量沿用 CommonMark。"""
     md = (
         MarkdownIt("commonmark", {"html": True})
         .enable(["table", "strikethrough"])
         .use(dollarmath_plugin, allow_labels=False)
+    )
+    # 显示公式可紧接正文开始；让公式块中断段落，避免相邻 $ 把中文正文吞入行内公式。
+    md.block.ruler.at(
+        "math_block",
+        display_math,
+        {"alt": ["paragraph", "reference", "blockquote", "list"]},
     )
     md.inline.ruler.at("emphasis", chinese_strong)
     return md

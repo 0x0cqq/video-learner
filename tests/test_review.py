@@ -10,6 +10,7 @@ from video_learner.common.core import InputError, TaskError
 from video_learner.common.schemas import Draft, DraftBlock, Notebook, ReviewFinding, ReviewResult
 from video_learner.common.storage import Events, read_json
 from video_learner.notes.composition import evidence_packet, validate_draft
+from video_learner.notes.prompts import FIDELITY_RULES, REVIEW_RULES
 from video_learner.notes.rendering import expected_spans, image_dependencies, render_notes
 from video_learner.notes.reviewing import apply_review_pass, review_input, reviewed_chapter
 from video_learner.providers.base import DeepSeekProvider
@@ -269,8 +270,57 @@ def test_independent_review_schema_and_repairs(converted, supplier, monkeypatch)
     assert len(client.requests) == 2
     assert all("旧生成历史" not in json.dumps(r, ensure_ascii=False) for r in client.requests)
     assert all("专门核对逻辑方向" in json.dumps(r, ensure_ascii=False) for r in client.requests)
+    schema = (
+        client.requests[0]["text"]["format"]["schema"]
+        if supplier == "deepseek"
+        else client.requests[0]["response_format"]["json_schema"]["schema"]
+    )
+    assert schema["properties"]["frames"] == {"type": "null"}
+    assert all(
+        block["properties"]["kind"]["const"] == "text"
+        for block in schema["$defs"]["DraftBlock"]["anyOf"]
+    )
     with pytest.raises(TaskError, match="上限"):
         service.review(packet, images)
+
+
+@pytest.mark.parametrize("supplier", ["deepseek", "qwen"])
+def test_visual_report_request_has_no_frame_application_instructions(converted, supplier):
+    """只报告的图文轮不要求同时返回逐图决策；实际请求仍保留共用保真和疑点规则。"""
+    root, _ = converted
+    book, current, _, _ = prepared(root)
+    step = ReviewStep(name="visual_check", kind="visual", mode="report")
+    frozen, images = review_input(book, book.chapters[0], Config(), root, current, "r002", step)
+    result = ReviewResult(frames=None, findings=[])
+    if supplier == "deepseek":
+        client = Client([response(result.model_dump_json())])
+        service = DeepSeekProvider(Config(), Events(root), client)
+    else:
+        from test_qwen_provider import Client as QwenClient
+        from test_qwen_provider import Stream, chunk
+
+        from video_learner.providers.qwen import QwenProvider
+
+        client = QwenClient([Stream([chunk(content=result.model_dump_json(), finish="stop")])])
+        service = QwenProvider(Config(provider="qwen"), Events(root), client)
+    adopted = service.review(frozen.packet, images)
+    request = client.requests[0]
+    prompt = (
+        request["instructions"] if supplier == "deepseek" else request["messages"][0]["content"]
+    )
+    assert FIDELITY_RULES in prompt and REVIEW_RULES in prompt
+    assert "只报告模式" in prompt and "frames=null" in prompt
+    assert "图文应用契约" not in prompt and "decision=use" not in prompt
+    schema = (
+        request["text"]["format"]["schema"]
+        if supplier == "deepseek"
+        else request["response_format"]["json_schema"]["schema"]
+    )
+    assert schema["properties"]["frames"] == {"type": "null"}
+    assert schema["$defs"]["ReviewFinding"]["properties"]["action"]["const"] == "report"
+    assert schema["$defs"]["ReviewFinding"]["properties"]["blocks"]["maxItems"] == 0
+    assert schema["properties"]["resolved_review_ids"]["maxItems"] == 0
+    assert apply_review_pass(book, frozen.packet, adopted, current) == (book, current)
 
 
 def test_function_pipeline_uses_updated_state_and_keeps_unresolved_issues(converted, tmp_path):

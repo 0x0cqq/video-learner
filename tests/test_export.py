@@ -66,6 +66,21 @@ def pdf_font():
         pytest.skip("本机没有测试所需的中文 TrueType 字体")
 
 
+@pytest.mark.parametrize("prefix", ["", "> "])
+def test_display_math_interrupts_prose_without_consuming_chinese(prefix):
+    """显示公式前后没有空行时仍独立解析，后续中文与行内公式不落入数学节点。"""
+    source = "\n".join(
+        prefix + line for line in "说明：\n$$\nx^2\n$$\n这里使用条件 $x>0$。".splitlines()
+    )
+    source += "\n\n```text\n$$literal$$\n```\n"
+    tokens = parser().parse(source)
+    assert [token.content.strip() for token in tokens if token.type == "math_block"] == ["x^2"]
+    inline = [child for token in tokens for child in token.children or []]
+    assert [token.content for token in inline if token.type == "math_inline"] == ["x>0"]
+    assert any(token.type == "text" and "这里使用条件" in token.content for token in inline)
+    assert next(token.content for token in tokens if token.type == "fence") == "$$literal$$\n"
+
+
 def test_export_portable_manual_markdown_and_static_html(converted, tmp_path):
     """移走视频和缓存后仍导出手改字节、表格、公式和图片，HTML 不执行素材脚本。"""
     root, video = converted
@@ -139,6 +154,24 @@ def test_pdf_paginates_tables_code_and_keeps_math_fallback(converted, tmp_path):
     assert text.count("序号") >= 2
     assert any("Mathtext" in warning for warning in read_json(target / "export.json")["warnings"])
     assert not list(target.glob(".pdf-*"))
+
+
+def test_pdf_wraps_chinese_with_multiple_inline_formulas(converted, tmp_path):
+    """连续行内公式在行尾触发换行，覆盖图片空字符造成的真实导出崩溃与后文丢失。"""
+    from pypdf import PdfReader
+
+    root, _ = converted
+    path = root / "notes.md"
+    heading = "\n\n### " + r"$\mathbb{Q}(\sqrt{2})$ 上的乘法与条件" * 8 + "\n\n"
+    paragraph = r"对元素 $x+\sqrt{2}y$ 求逆时核对 $x^2-2y^2$ 的非零条件。" * 20
+    display = "\n\n推导：\n$$\nx^2\n$$\n这里使用有理数的封闭性 $x+y$。\n\n推导结束。\n"
+    path.write_bytes(path.read_bytes() + (heading + paragraph + display).encode())
+    target = export(root, tmp_path / "inline-math-pdf", ["pdf"], pdf_font=pdf_font())
+    reader = PdfReader(target / "notes.pdf")
+    text = "\n".join(page.extract_text() for page in reader.pages)
+    assert "推导结束" in text and text.count("非零条件") == 20
+    assert "这里使用有理数的封闭性" in text
+    assert sum(len(page.images) for page in reader.pages) >= 3
 
 
 @pytest.mark.parametrize(

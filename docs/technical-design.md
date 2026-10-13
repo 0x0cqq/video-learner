@@ -74,7 +74,7 @@ ASR 通过 `jobs` 控制有界请求并发，默认 1；切片生成和响应保
 
 图文整理通过 `provider` 选择 DeepSeek 或 Qwen，不调用 OpenAI 服务或自动回退。`openai` 包作为两家服务的兼容客户端。默认 DeepSeek `deepseek-flash`，固定连接 `https://api.deepseek.com`。[DeepSeek 图像接口](https://api-docs.deepseek.com/guides/vision/)
 
-DeepSeek 使用 Responses API 图像输入和 JSON schema 响应。Qwen 使用 Chat Completions，固定连接 `https://dashscope.aliyuncs.com/compatible-mode/v1`，默认 `qwen3.8-flash`；图片以 Base64 `image_url` 发送，schema 同时写入请求格式和系统提示。两者均执行 Pydantic 及跨字段校验。text 块的 frame_id 必须为 null；figure 块必须引用本次提供的 frame ID 并将其包含在证据列表中。同章不重复导出同一截图。模型不能控制本地路径、HTML 锚点或来源时间戳。[DeepSeek Responses API](https://api-docs.deepseek.com/api/create-response/)
+DeepSeek 使用 Responses API 图像输入和 JSON schema 响应。Qwen 使用 Chat Completions，固定连接 `https://dashscope.aliyuncs.com/compatible-mode/v1`，默认 `qwen3.8-flash`；图片以 Base64 `image_url` 发送，schema 同时写入请求格式和系统提示。两者均执行 Pydantic 及跨字段校验。text 块的 frame_id 必须为 null；figure 块必须引用本次提供的 frame ID 并将其包含在证据列表中。同章不重复导出同一截图。复审请求 schema 按职能限定块类型：图文轮为 figure，内容轮为 text；内容和只报告轮的 frames 为 null，只报告轮的 action 为 report、blocks 和 resolved_review_ids 为空。目标块、证据和图片身份继续由本地校验。模型不能控制本地路径、HTML 锚点或来源时间戳。[DeepSeek Responses API](https://api-docs.deepseek.com/api/create-response/)
 
 DeepSeek 默认 `reasoning_effort = "none"`，单次最多 6000 输出 token，任务最多 120 次实际请求、最多 2 次重试，均可在 TOML 调整。SDK 内置重试关闭。输出截断直接失败；临时网络错误及结构/引用错误有界重试；认证和请求配置错误直接报告。日志记录服务返回的输入/输出 token 和耗时；超时请求仍可能计费。[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)
 
@@ -88,7 +88,9 @@ Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 tok
 
 编程保留目标、修改、错误、修复和运行结果；数学保留原课中存在的假设、符号、关键推导、结论和条件；混合内容按实际材料组织，不强行填模板。内容分为原课整理、显式要求的 AI 补充解释和待核对。模糊公式、代码和未交代条件进入疑点清单。
 
-正文直接讲解课程内容，不逐图描述或堆放转写。图注允许为空，文字块必须非空；图意自明或已由正文解释时省略图注，不强求每章配图。提示词版本为 p0-8。原课类别、块 ID、来源区间、证据列表和手改同步状态放入 `sources.md`；`review.md` 列出内容疑点并以单条提示标明手改状态。正文仅显式标记 AI 补充和待核对，保留隐藏修订锚点。标题中的行内 LaTeX 保留原命令，标题其余 Markdown 控制字符转义。
+正文直接讲解课程内容，不逐图描述或堆放转写。图注允许为空，文字块必须非空；图意自明或已由正文解释时省略图注，不强求每章配图。原课类别、块 ID、来源区间、证据列表和手改同步状态放入 `sources.md`；`review.md` 列出内容疑点并以单条提示标明手改状态。正文仅显式标记 AI 补充和待核对，保留隐藏修订锚点。标题中的行内 LaTeX 保留原命令，标题其余 Markdown 控制字符转义。
+
+提示词版本为 p0-9，`notes/prompts.py` 集中维护生成与复审共用的证据、保真、配图和疑点规则。组织优先级为证据忠实与关键条件完整、教学主线与理解过程、精简与文体。语音说明当前主题和评价归属，相关且清晰的画面用于核对代码、公式、数字和引语的精确内容，先确认对象、版本与操作状态一致。直接引语保留原文，翻译或压缩使用转述；屏幕上的 AI 回答、搜索摘要及他人评论保留材料身份。局部不确定断言独立成块，疑点明确知识点、尚不确定的断言和回看需确认的内容。配图按是否有助于理解或核对当前解释选择，分别保留关键状态。自造表达示例仅说明规则，不作为课程证据。
 
 证据包版本 2 用 `boundary_context_not_citable.before/after` 区分边界方向，每张帧的 `speech_window_ids` 指向其实际所在音频窗口。这个关系只表示时间邻近，不表示语义匹配，也不创造句级时间戳。正文确定性检查拒绝当前证据 ID 泄漏和章节末尾空标题，保留代码围栏中的字面示例；旧冻结包按原契约离线重建。
 
@@ -98,7 +100,7 @@ Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 tok
 
 `ReviewStep` 包含唯一名称、职能、用户 `instruction` 和 `mode=apply|report`，配置列表整体替换默认列表。图文轮允许选图、移动图片及纠正已有图注；内容轮仅修改文字，仍可读图核对正文。报告模式只增加疑点。职能边界在本地校验，自定义规则仍受证据和写入范围约束；配置方法见[使用指南](usage.md#独立复审)。
 
-单轮函数接口为 `(packet, images) -> ReviewResult`，默认调用 `Provider.review`；嵌入 Python 时可向 `workflows.reviewing.review(..., reviewers={"content": check_content})` 注入同接口函数，按步骤名称覆盖。未知名称在执行前报错；未覆盖的步骤沿用模型。`notes/review_prompts.py` 组织职能提示词，供应商仅负责请求和有界修复。流程直接顺序迭代配置列表。
+单轮函数接口为 `(packet, images) -> ReviewResult`，默认调用 `Provider.review`；嵌入 Python 时可向 `workflows.reviewing.review(..., reviewers={"content": check_content})` 注入同接口函数，按步骤名称覆盖。未知名称在执行前报错；未覆盖的步骤沿用模型。`notes/review_prompts.py` 在共用规则上组合职能与操作模式，逐图决策和内容替换契约仅加入应用模式，只报告模式要求 `frames=null` 与 `report`。供应商仅负责请求和有界修复，流程顺序迭代配置列表。
 
 `ReviewResult` 包含可选逐图决定 `frames`、局部 `findings` 和 `resolved_review_ids`。`frames=null` 保留全部图片；图文应用轮须完整评估候选，采用图的落点为文字块时放在其后，为已有图片块时沿用原位置。新增图默认无图注。文字替换/插入只作用于目标块，证据必须属于本次范围；图文轮的图注替换保持同一 frame_id。`apply_review_pass()` 是纯函数，返回新 Notebook 和 Markdown，输入对象不变；按稳定块 ID 只拼接变化范围，移动原图保留手改图注与其他非目标字节。新增块 ID 包含步骤名，连续插入不会互相覆盖。
 
@@ -182,13 +184,13 @@ output/sample/
 
 `exports/document.py:prepare_document()` 生成 `ExportDocument`：Notebook 元数据快照、正文/来源/疑点三个文档部分，以及已验证的本地图片映射。每部分同时保存原始 Markdown 字节和共享的 Markdown-it 语法节点，包含表格、代码、图片和公式。当前手改文稿优先于结构化正文，不能仅从旧 Notebook 重新生成全文。导出命令发现当前正文与基线快照不同，会在副本标记 `manual_unverified`；独立目录没有生成快照时，采用与 Notebook 重渲染结果的保守比较。输入索引保持不变。
 
-共享解析器以 CommonMark 为基础，对双星号加粗增加中文边界规则：标记外侧是汉字、内侧是标点时也允许配对，例如 `体现**术语（term）**的含义`。配对和嵌套仍交给原解析器；代码、转义及公式保留字面内容。该规则用于 HTML/PDF 的语法节点，Markdown 导出保留原字节，外部编辑器的显示取决于其 Markdown 规则。
+共享解析器以 CommonMark 为基础，对双星号加粗增加中文边界规则：标记外侧是汉字、内侧是标点时也允许配对，例如 `体现**术语（term）**的含义`。单独行的 `$$` 显示公式可中断正文段落，前后无需空行，公式后的文字保持普通正文。配对和嵌套仍交给原解析器；代码、转义及公式保留字面内容。该规则用于 HTML/PDF 的语法节点，Markdown 导出保留原字节，外部编辑器的显示取决于其 Markdown 规则。
 
 三个适配器均为 `write(document, destination) -> list[str]` 普通函数，PDF 另接受字体参数；`write_document()` 顺序调用所选函数。没有插件注册、继承层级或多级转换管线。各格式消费同一份快照，不需要先运行 Markdown 适配器；按实际阅读方式各自布局：
 
 - Markdown 保存正文原字节、相对图片、来源及疑点文件，保留锚点与换行。
 - HTML 将图片编码内嵌为单文件，用本地 [latex2mathml](https://github.com/roniemartinez/latex2mathml) 生成 MathML，正文后附来源与疑点；支持屏幕宽度变化，无在线脚本或字体依赖。
-- PDF 使用常规依赖中的 ReportLab/Matplotlib，嵌入中文 TrueType 字体，生成 A4 分页、内部目录链接、完整截图及附录。[长表重复表头](https://docs.reportlab.com/reportlab/userguide/ch7_tables/)，代码换行；公式采用 [Mathtext 子集](https://matplotlib.org/stable/users/explain/text/mathtext.html)。超出支持范围时保留标记清楚的 LaTeX 原文，不保证与 HTML 的公式表现一致。
+- PDF 使用常规依赖中的 ReportLab/Matplotlib，嵌入中文 TrueType 字体，生成 A4 分页、内部目录链接、完整截图及附录。[长表重复表头](https://docs.reportlab.com/reportlab/userguide/ch7_tables/)，代码换行；公式采用 [Mathtext 子集](https://matplotlib.org/stable/users/explain/text/mathtext.html)。包含行内公式图片的段落使用标准断行，其余段落使用 CJK 断行。超出支持范围时保留标记清楚的 LaTeX 原文，不保证与 HTML 的公式表现一致。
 
 HTML/PDF 将手写 HTML 静态化为文字、图片和锚点；代码围栏仍作为字面内容。图片须为版本内或已登记证据中的有效位图，拒绝外部 URL、越界和缺失依赖；链接仅保留文内、普通网页和邮件地址。HTML 附加限制资源加载的 CSP。版本和独立导出均用 `export.json` 记录格式及排版警告，并保留 `notes.json`、`source.json`；HTML/PDF 单文件本身即可阅读。手改 Markdown 后再次 `export` 读取当前正文；继续 CLI 修订仍需原工作目录。
 
