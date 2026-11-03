@@ -3,13 +3,13 @@
 import argparse
 from pathlib import Path
 
-from video_learner.common.config import Config
+from video_learner.common.config import load_config
 from video_learner.common.core import InputError, TaskError, contained, output_path
 from video_learner.common.schemas import CompositionInput, Notebook
 from video_learner.common.storage import Events, digest, read_json, write_json
 from video_learner.common.usage import summarize_usage
 from video_learner.notes.composition import evidence_packet
-from video_learner.providers.base import create_provider
+from video_learner.notes.generation import create_generator
 
 
 def main() -> None:
@@ -25,7 +25,7 @@ def main() -> None:
     root = args.workdir.resolve()
     target = output_path(root, args.output)
     book = Notebook.model_validate(read_json(root / "notes.json"))
-    config = Config.model_validate(read_json(root / ".work/manifest.json")["config"])
+    config = load_config(base=read_json(root / ".work/manifest.json")["config"])
     selected = [c for c in book.chapters if c.id in args.sections]
     if len(selected) != len(args.sections):
         raise InputError("章节不存在或重复，请从 sources.md 选择明确 ID")
@@ -33,7 +33,7 @@ def main() -> None:
         raise InputError("单次真实对照最多选择三章，整课检查请先复用已有产物")
     config = config.model_copy(
         update={
-            "deepseek_context": args.context,
+            "composition_context": args.context,
             "max_calls": len(selected),
             "max_retries": 0,
             "secret_file": str(args.secret.resolve()) if args.secret else None,
@@ -41,7 +41,11 @@ def main() -> None:
     )
     target.mkdir(parents=True, exist_ok=False)
     events = Events(target)
-    service = create_provider(config, events) if args.live else None
+    service = (
+        create_generator(config, events, response_directory=target / ".work/model-responses")
+        if args.live
+        else None
+    )
     try:
         for chapter in selected:
             recorded = contained(root, f".work/composition-inputs/{chapter.id}.json")

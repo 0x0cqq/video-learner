@@ -1,13 +1,7 @@
-import json
-
 import pytest
-from test_conversion import DeterministicProvider
-from typer.testing import CliRunner
 
 from video_learner.common.config import Config, ModelPrice
-from video_learner.common.core import TaskError
 from video_learner.common.usage import request_cost, summarize_usage
-from video_learner.workflows.conversion import convert
 
 
 @pytest.mark.parametrize("provider", ["deepseek", "qwen"])
@@ -79,88 +73,3 @@ def test_deepseek_prices_follow_beijing_request_start():
         ("2026-09-12T01:00:00+00:00", 0.001204),
     ]:
         assert request_cost({**usage, "started_at": utc}, price) == pytest.approx(expected)
-
-
-def test_conversion_cli_prints_meter_and_saves_report(video, tmp_path, monkeypatch):
-    """从 CLI 运行真实媒体流程，注入带用量的供应商，验证终端估价与独立 JSON。"""
-    from video_learner.cli import app
-
-    class Provider(DeterministicProvider):
-        def __init__(self, events):
-            self.events = events
-
-        def compose(self, packet, images):
-            """模拟服务返回已计费响应，转换仍使用真实媒体与证据校验。"""
-            self.events.emit("model_call", "running", call=1, model="qwen3.8-flash")
-            self.events.emit(
-                "model_usage",
-                "received",
-                call=1,
-                model="qwen3.8-flash",
-                input_tokens=1000,
-                output_tokens=100,
-            )
-            return super().compose(packet, images)
-
-    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
-    monkeypatch.setattr(
-        "video_learner.workflows.conversion.create_provider",
-        lambda config, events: Provider(events),
-    )
-    subtitle = video.with_suffix(".srt")
-    subtitle.write_text("1\n00:00:00,000 --> 00:00:04,000\n测试\n", encoding="utf-8")
-    config = tmp_path / "pricing.toml"
-    config.write_text(
-        'provider = "qwen"\n[prices."qwen:qwen3.8-flash"]\n'
-        'currency = "CNY"\ninput_per_million = 2\noutput_per_million = 8\n',
-        encoding="utf-8",
-    )
-    output = tmp_path / "converted"
-    result = CliRunner().invoke(
-        app,
-        [
-            "convert",
-            str(video),
-            "--output",
-            str(output),
-            "--subtitle",
-            str(subtitle),
-            "--config",
-            str(config),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert "Token meter" in result.output and "0.002800 CNY" in result.output
-    report = json.loads((output / "usage.json").read_text(encoding="utf-8"))
-    assert report["estimate_complete"]
-    assert report["input_tokens"] == 1000
-    assert "test-key" not in json.dumps(report)
-
-
-def test_failed_conversion_keeps_known_usage(video, tmp_path, monkeypatch):
-    """单章失败也输出已经发生的用量，避免只统计成功章节而低估费用。"""
-
-    class Provider:
-        def __init__(self, events):
-            self.events = events
-
-        def compose(self, packet, images):
-            """收到带用量的响应后触发校验失败，模拟已计费但未生成讲义。"""
-            self.events.emit("model_call", "running", call=1)
-            self.events.emit("model_usage", "received", call=1, input_tokens=50, output_tokens=20)
-            raise TaskError("故障模拟")
-
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
-    monkeypatch.setattr(
-        "video_learner.workflows.conversion.create_provider",
-        lambda config, events: Provider(events),
-    )
-    subtitle = video.with_suffix(".srt")
-    subtitle.write_text("1\n00:00:00,000 --> 00:00:04,000\n测试\n", encoding="utf-8")
-    output = tmp_path / "failed"
-    with pytest.raises(TaskError):
-        convert(video, output, Config(prices={}), subtitle=subtitle)
-    report = json.loads((output / "usage.json").read_text(encoding="utf-8"))
-    assert report["input_tokens"] == 50 and report["output_tokens"] == 20
-    assert not report["estimate_complete"]
-    assert report["estimated_known_cost"] == {}

@@ -3,13 +3,10 @@ import json
 from pathlib import Path
 
 import pytest
-from test_provider import VALID, packet
-from test_qwen_provider import Client, Stream, chunk
+from model_fakes import VALID, Stream, chunk, packet, session
 
-from video_learner.common.config import Config
 from video_learner.common.core import TaskError
 from video_learner.common.storage import Events
-from video_learner.providers.qwen import QwenProvider
 
 
 def test_stage_summary_does_not_double_count_or_mix_revisions():
@@ -44,22 +41,11 @@ def test_stage_summary_does_not_double_count_or_mix_revisions():
     # 同一次转换新增的复审计入总量，随后单独复审不能覆盖重置的调用编号。
     current = [{**row, "run_id": "initial"} for row in records[:10]]
     current.extend(
-        [
-            {"stage": "review", "status": "completed", "seconds": 4, "run_id": "initial"},
-            {
-                "stage": "model_usage",
-                "status": "received",
-                "call": 4,
-                "seconds": 4,
-                "run_id": "initial",
-            },
-            {
-                "stage": "model_usage",
-                "status": "received",
-                "call": 1,
-                "seconds": 99,
-                "run_id": "later",
-            },
+        {"stage": stage, "status": status, "seconds": seconds, "call": call, "run_id": run}
+        for stage, status, seconds, call, run in [
+            ("review", "completed", 4, None, "initial"),
+            ("model_usage", "received", 4, 4, "initial"),
+            ("model_usage", "received", 99, 1, "later"),
         ]
     )
     revised = module.summarize_events(current)
@@ -81,11 +67,6 @@ def test_stream_timing_separates_first_chunks_and_excludes_thinking_text(tmp_pat
                 clock[0] = at
                 yield value
 
-    class TimedClient(Client):
-        def create(self, **kwargs):
-            clock[0] = 2.0
-            return super().create(**kwargs)
-
     stream = TimedStream(
         [
             (3.0, chunk(reasoning="private-timing-thought")),
@@ -93,8 +74,14 @@ def test_stream_timing_separates_first_chunks_and_excludes_thinking_text(tmp_pat
             (12.0, chunk(finish="stop")),
         ]
     )
-    first = Events(tmp_path)
-    provider = QwenProvider(Config(provider="qwen"), first, TimedClient([stream]))
+    provider, _ = session(tmp_path, "qwen", [stream])
+
+    def create(**request):
+        """建立流耗时两秒，流内到达时刻由受控迭代器提供。"""
+        clock[0] = 2.0
+        return stream
+
+    monkeypatch.setattr(provider.provider.client.chat.completions, "create", create)
     assert provider.compose(packet(), []).title == "章节"
     second = Events(tmp_path)
     second.emit("next_run", "running")
@@ -131,8 +118,7 @@ def test_stream_service_error_is_measured_without_leaking_or_retrying(tmp_path):
             ),
         ]
     )
-    client = Client([stream])
-    provider = QwenProvider(Config(provider="qwen"), Events(tmp_path), client)
+    provider, client = session(tmp_path, "qwen", [stream])
     with pytest.raises(TaskError, match="不自动重试") as error:
         provider.compose(packet(), [])
     records = [

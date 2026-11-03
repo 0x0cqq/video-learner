@@ -17,11 +17,11 @@ from video_learner.common.core import US, InputError, contained
 from video_learner.common.schemas import Draft, Notebook, ReviewResult
 from video_learner.common.storage import atomic_bytes, digest, read_json, write_json
 from video_learner.exports import export_book
+from video_learner.media.audio import encode_wav
 from video_learner.media.evidence import audio_window, sample_frames
 from video_learner.notes.composition import validate_notebook
 from video_learner.notes.rendering import render_notes
-from video_learner.providers.asr import encode_wav
-from video_learner.workflows.revision import baseline_config
+from video_learner.workflows.versions import baseline_config
 
 
 def distribution(values: list[float]) -> dict:

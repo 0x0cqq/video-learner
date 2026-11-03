@@ -1,118 +1,42 @@
 """显式基线、目标范围替换与手改保护。"""
 
-import hashlib
-import re
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from pydantic import ValidationError
-
-from video_learner.common.config import Config, load_config
+from video_learner.common.config import load_config
 from video_learner.common.core import InputError, contained
 from video_learner.common.schemas import NoteBlock, Notebook, ReviewItem
 from video_learner.common.storage import (
     Events,
     atomic_bytes,
-    canonical_hash,
-    digest,
     directory_lock,
-    read_json,
     write_json,
 )
 from video_learner.exports import export_book
 from video_learner.exports.pdf import font_path
 from video_learner.media.evidence import register_frame
-from video_learner.media.io import inspect_source
 from video_learner.notes.composition import (
     apply_revision_draft,
     evidence_packet,
     freeze_composition_input,
     validate_notebook,
 )
+from video_learner.notes.generation import Generator, create_generator
 from video_learner.notes.rendering import (
     AnchorConflict,
-    expected_spans,
     frame_of,
-    image_dependencies,
-    local_image,
     render_block,
 )
-from video_learner.providers.base import Provider, create_provider
-from video_learner.workflows.conversion import (
+from video_learner.workflows.versions import (
+    baseline_config,
+    commit_revision,
+    conflict_report,
     extraction_hash,
-    fingerprint_source,
+    load_editable_baseline,
+    next_revision,
+    verify_source,
 )
-
-
-def baseline_config(manifest: dict) -> Config:
-    """加载当前版本的提取设置并核对指纹；不迁移旧工作目录。"""
-    if manifest.get("extraction_version") != 4:
-        raise InputError("提取数据版本不兼容，请重新转换到独立目录")
-    settings = manifest.get("config")
-    if not isinstance(settings, dict):
-        raise InputError("工作清单配置无效")
-    config = load_config(base=settings)
-    if extraction_hash(config) != manifest.get("extraction_hash"):
-        raise InputError("提取配置指纹不一致，请恢复原工作清单")
-    return config
-
-
-def conflict_report(root: Path, message: str, suggestion: bytes = b"") -> Path:
-    """写入独立冲突诊断和建议片段，返回其目录；不改基线、不登记成功版本。"""
-    folder = contained(root, f".work/conflicts/{uuid.uuid4().hex}")
-    folder.mkdir(parents=True, exist_ok=False)
-    atomic_bytes(
-        folder / "diagnostic.md",
-        (
-            "# 修订冲突\n\n" + message + "\n\n原版未改写，没有登记成功版本。"
-            "请对照生成快照恢复唯一锚点，或手工合并建议片段后再运行。\n"
-        ).encode("utf-8"),
-    )
-    atomic_bytes(
-        folder / "suggestion.md",
-        suggestion or ("未调用模型。无法确认目标范围，请先恢复锚点后重试。\n").encode(),
-    )
-    return folder
-
-
-def load_baseline(root: Path, base: str) -> tuple[dict, Path, Notebook, bytes]:
-    """读取显式成功版本，校验其目录、结构化索引和生成快照哈希。
-
-    返回清单、版本目录、讲义对象和快照字节；当前 notes.md 可有手改，由修订流程另行核对。
-    """
-    if not re.fullmatch(r"r\d{3,}", base):
-        raise InputError("基线版本格式为 r001、r002 等")
-    manifest = read_json(contained(root, ".work/manifest.json"))
-    if manifest.get("schema_version") != 2 or manifest.get("status") != "completed":
-        raise InputError("此工作目录不是兼容的完整转换结果；请重新转换到独立目录")
-    versions = manifest.get("versions", {})
-    if (
-        not isinstance(versions, dict)
-        or not versions
-        or any(
-            not re.fullmatch(r"r\d{3,}", identity) or not isinstance(record, dict)
-            for identity, record in versions.items()
-        )
-    ):
-        raise InputError("版本清单结构损坏")
-    if base not in versions or versions[base].get("status") != "completed":
-        raise InputError("指定的成功基线版本不存在")
-    folder = "." if base == "r001" else f"revisions/{base}"
-    if versions[base].get("folder") != folder:
-        raise InputError("版本清单路径不一致")
-    directory = root if base == "r001" else contained(root, folder)
-    notes = contained(directory, "notes.json")
-    if digest(notes) != versions[base].get("notes_hash"):
-        raise InputError("结构化索引已改变；只支持手改 notes.md，请恢复索引或重新转换")
-    try:
-        book = Notebook.model_validate(read_json(notes))
-    except ValidationError:
-        raise InputError("结构化索引版本不兼容或已损坏") from None
-    snapshot = contained(root, f".work/versions/{base}.generated.md").read_bytes()
-    if hashlib.sha256(snapshot).hexdigest() != versions[base].get("markdown_hash"):
-        raise InputError("生成快照与清单不一致，停止复用")
-    return manifest, directory, book, snapshot
 
 
 def revise(
@@ -127,7 +51,7 @@ def revise(
     secret: Path | None = None,
     allow_ai_additions: bool | None = None,
     progress: Callable[[dict], None] | None = None,
-    provider: Provider | None = None,
+    generator: Generator | None = None,
     model_provider: str | None = None,
     model: str | None = None,
     pdf_font: Path | None = None,
@@ -153,31 +77,18 @@ def revise(
     if not contained(root, ".work/manifest.json").is_file():
         raise InputError("此目录没有本工具的工作清单")
     with directory_lock(root.parent / f".{root.name}.lock"):
-        manifest, baseline, book, snapshot = load_baseline(root, base)
-        current_path = contained(baseline, "notes.md")
-        if current_path.stat().st_size > 30_000_000:
-            raise InputError("当前 Markdown 超过 30 MB，不能安全进行局部修订")
-        current = current_path.read_bytes()
-        current_hash = hashlib.sha256(current).hexdigest()
+        editable = load_editable_baseline(root, base)
+        manifest, baseline, book = editable.manifest, editable.directory, editable.book
+        current, current_hash = editable.current, editable.current_hash
+        snapshot, spans, original_spans = editable.snapshot, editable.spans, editable.original_spans
         target_id = section or block
-        try:
-            spans = expected_spans(current, book)
-            original_spans = expected_spans(snapshot, book)
-            if target_id not in spans:
-                raise InputError("目标 ID 不存在，请查看当前文档中的章节/块 ID")
-        except AnchorConflict as exc:
-            report = conflict_report(root, str(exc))
-            raise InputError(f"{exc}；诊断与建议片段：{report}") from exc
+        if target_id not in spans:
+            raise InputError("目标 ID 不存在，请查看当前文档中的章节/块 ID")
         span = spans[target_id]
         target_chapter = next(c for c in book.chapters if c.id == (section or span.parent))
         target_block = next((b for b in target_chapter.blocks if b.id == block), None)
         if image_operation and (target_block is None or target_block.kind != "figure"):
             raise InputError("指定块不是图片块")
-        # 先核对手加图片依赖，避免已知无法导出的请求仍然产生模型费用。
-        for reference in image_dependencies(current):
-            image = contained(baseline, local_image(reference))
-            if not image.is_file():
-                raise InputError("基线文档中的图片依赖缺失")
         original_config = baseline_config(manifest)
         config = load_config(
             config_path,
@@ -191,33 +102,10 @@ def revise(
         if extraction_hash(config) != extraction_hash(original_config):
             # 模型可换，提取设置不能换；当前修订必须继续使用基线对应的同一组证据。
             raise InputError("提取配置与基线不一致，请重新转换到独立目录")
-        local_source = read_json(contained(root, ".work/source-local.json"))
-        if canonical_hash(local_source.get("files")) != manifest.get("source_hash"):
-            raise InputError("本地来源清单与原始指纹不一致")
-        source_path = Path(local_source["path"])
-        source = inspect_source(source_path)
-        subtitle = Path(local_source["subtitle"]) if local_source.get("subtitle") else None
-        fingerprints = fingerprint_source(source_path, source, subtitle)
-        # 标题是展示信息，媒体和元数据指纹已验证；改进标题组合不应使旧证据失效。
-        if fingerprints != local_source["files"] or source.model_dump(
-            exclude={"title"}
-        ) != book.source.model_dump(exclude={"title"}):
-            raise InputError("源素材与基线不一致，请重新转换到独立目录")
+        source_state = verify_source(root, manifest, book)
+        source_path, source = source_state.path, source_state.source
         validate_notebook(book, root)
-        if current != snapshot:
-            # 不把保留的手改反向猜写进索引，而是标明两者尚未核验同步。
-            book.sync_status = "manual_unverified"
-        for chapter in book.chapters:
-            for note_block in chapter.blocks:
-                now = spans[note_block.id]
-                previous = original_spans[note_block.id]
-                if current[now.start : now.end] != snapshot[previous.start : previous.end]:
-                    note_block.sync_status = "manual_unverified"
-        number = max(int(identity[1:]) for identity in manifest["versions"]) + 1
-        revision_id = f"r{number:03d}"
-        destination = contained(root, f"revisions/{revision_id}")
-        if destination.exists():
-            raise InputError("新版本目录已存在但未登记，可能有未完成提交，请保留并人工核对")
+        revision_id, destination = next_revision(root, manifest)
         staging = contained(root, f".work/revision-{uuid.uuid4().hex}.partial")
         staging.mkdir(parents=True, exist_ok=False)
         events = Events(root, progress)
@@ -261,7 +149,9 @@ def revise(
                         )
                     )
                 else:
-                    active_provider = provider or create_provider(config, events)
+                    active_generator = generator or create_generator(
+                        config, events, response_directory=contained(root, ".work/model-responses")
+                    )
                     fixed_chapter = target_chapter.model_copy(deep=True)
                     if target_block:
                         from video_learner.notes.rendering import evidence_range
@@ -280,6 +170,8 @@ def revise(
                         current_markdown=current[span.start : span.end].decode("utf-8"),
                         target_ids=[target_id],
                     )
+                    if target_block is not None:
+                        packet["target_block_kind"] = target_block.kind
                     if target_block and target_block.kind == "figure":
                         # 图注修订固定原图，不能让模型借此执行 P1 的自然语言重新选图。
                         pinned = frame_of(book, target_block.frame_id)
@@ -296,7 +188,7 @@ def revise(
                         contained(root, f".work/composition-inputs/{record_id}.json"),
                         frozen.model_dump(),
                     )
-                    draft = active_provider.compose(frozen.packet, images)
+                    draft = active_generator.compose(frozen.packet, images)
                     replacement = apply_revision_draft(
                         book,
                         target_chapter,
@@ -324,29 +216,19 @@ def revise(
                         "- 关联证据及待核对事项见 notes.json 与 review.md。\n"
                     ).encode(),
                 )
-                if digest(current_path) != current_hash:
-                    # 独占锁约束工具自身，但不能阻止用户用编辑器改文稿，提交前必须复核。
-                    report = conflict_report(root, "模型请求或导出期间基线被再次编辑", replacement)
-                    raise InputError(f"检测到并发编辑；建议片段：{report}")
-                if fingerprint_source(source_path, source, subtitle) != fingerprints:
-                    raise InputError("修订期间源素材发生变化，未发布版本")
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                staging.rename(destination)
-                # 完整目录先落位，再写快照与清单；中途失败的目录不能自动视为已登记版本。
-                atomic_bytes(
-                    contained(root, f".work/versions/{revision_id}.generated.md"), new_current
+                commit_revision(
+                    root,
+                    editable,
+                    source_state,
+                    staging,
+                    destination,
+                    new_current,
+                    {
+                        "target": target_id,
+                        **({"composition_record": record_id} if record_id else {}),
+                    },
+                    replacement,
                 )
-                manifest["versions"][revision_id] = {
-                    "folder": f"revisions/{revision_id}",
-                    "base": base,
-                    "status": "completed",
-                    "markdown_hash": hashlib.sha256(new_current).hexdigest(),
-                    "notes_hash": digest(contained(destination, "notes.json")),
-                    "base_current_hash": current_hash,
-                    "target": target_id,
-                    **({"composition_record": record_id} if record_id else {}),
-                }
-                write_json(contained(root, ".work/manifest.json"), manifest)
             return destination
         except AnchorConflict as exc:
             report = conflict_report(root, str(exc), replacement)

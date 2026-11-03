@@ -10,7 +10,7 @@ from video_learner.common.schemas import Notebook
 from video_learner.common.storage import digest, directory_lock, read_json, write_json
 from video_learner.exports import ExportFormat, prepare_document, write_document
 from video_learner.notes.rendering import render_notes
-from video_learner.workflows.revision import load_baseline
+from video_learner.workflows.versions import load_baseline
 
 
 def export(

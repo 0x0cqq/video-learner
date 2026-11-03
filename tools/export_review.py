@@ -4,7 +4,7 @@ import argparse
 import uuid
 from pathlib import Path
 
-from video_learner.common.config import Config
+from video_learner.common.config import load_config
 from video_learner.common.core import InputError, output_path
 from video_learner.common.schemas import Draft, Notebook
 from video_learner.common.storage import directory_lock, read_json
@@ -36,7 +36,7 @@ def export_review(root: Path, edited: Path, output: Path) -> Path:
         (c.id, c.start_us, c.end_us) for c in baseline.chapters
     ]:
         raise InputError("审阅副本必须保留原章节范围和 ID")
-    config = Config.model_validate(read_json(root / ".work/manifest.json")["config"])
+    config = load_config(base=read_json(root / ".work/manifest.json")["config"])
     for chapter in book.chapters:
         if chapter.status != "completed":
             raise InputError(f"审阅副本仍有未完成章节：{chapter.id}")

@@ -3,6 +3,10 @@ from fractions import Fraction
 import av
 import numpy as np
 import pytest
+from model_fakes import DeterministicGenerator
+
+from video_learner.common.config import Config
+from video_learner.workflows.conversion import convert
 
 
 @pytest.fixture
@@ -41,3 +45,18 @@ def video(tmp_path):
             for packet in stream.encode(None):
                 output.mux(packet)
     return path
+
+
+@pytest.fixture
+def converted(video, tmp_path):
+    """用显式字幕跳过 ASR，再以确定性供应商生成可供版本和修订测试复用的工作目录。"""
+    subtitle = video.with_suffix(".srt")
+    subtitle.write_text("1\n00:00:00,000 --> 00:00:04,000\n自造音频测试。\n", encoding="utf-8")
+    root = convert(
+        video,
+        tmp_path / "output",
+        Config(sample_seconds=1, asr_language=None, review_pass=False),
+        subtitle=subtitle,
+        generator=DeterministicGenerator(),
+    )
+    return root, video

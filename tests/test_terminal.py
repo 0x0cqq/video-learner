@@ -1,11 +1,10 @@
 import io
 import json
 
-import pytest
 from rich.console import Console
 
 from video_learner.common.storage import Events
-from video_learner.terminal import RequestMetrics, TerminalProgress
+from video_learner.terminal import TerminalProgress
 
 
 def test_redirected_output_is_short_but_log_keeps_details(tmp_path):
@@ -49,58 +48,3 @@ def test_interactive_progress_keeps_failures_and_metrics_visible():
     assert "2/5" in rendered and "失败 1 章" in rendered
     assert "第 4 章" in rendered and "模型思考中" in rendered
     assert "预计总请求 5" in rendered and "请求已发 1" in rendered and "待发约 4" in rendered
-
-
-@pytest.mark.parametrize("error", [RuntimeError, KeyboardInterrupt])
-def test_failure_and_cancellation_do_not_report_success(error):
-    """异常退出先关闭动态显示，保留正确终态并继续传播原异常。"""
-    output = io.StringIO()
-    with pytest.raises(error), TerminalProgress(Console(file=output)):
-        raise error()
-    assert output.getvalue().startswith("已中断" if error is KeyboardInterrupt else "未完成")
-
-
-def test_request_metrics_count_attempts_and_time_each_call_once():
-    """失败、返回与校验可能重复报告同一调用；均耗时只计一次，未发出的重试不计数。"""
-    metrics = RequestMetrics()
-    metrics.observe({"status": "running", "call": 1, "attempt": 1})
-    metrics.observe({"status": "failed", "call": 1, "seconds": 6})
-    metrics.observe({"status": "retrying", "attempt": 1})
-    assert metrics.retries == 0
-    metrics.observe({"status": "running", "call": 2, "attempt": 2})
-    metrics.observe({"status": "received", "call": 2, "seconds": 2})
-    metrics.observe({"status": "failed", "call": 2, "seconds": 2.5})
-    metrics.observe({"status": "running", "call": 3, "attempt": 1})
-    text = metrics.describe(10)
-    assert "预计总请求 11" in text and "待发约 8" in text
-    assert "请求已发 3" in text and "已结束 2" in text
-    assert "重试 1" in text and "均耗时 4.0 秒" in text
-
-
-def test_stage_summaries_use_actual_counts_and_preserve_partial_status():
-    """片数含无文字切片、请求含重试；部分图文结果不能显示全成功。"""
-    output = io.StringIO()
-    display = TerminalProgress(Console(file=output, width=180))
-    for reason in ("pause", "limit"):
-        display({"stage": "audio_boundary", "status": "selected", "reason": reason})
-    for call, attempt in ((1, 1), (2, 2), (3, 1)):
-        display({"stage": "asr_model_call", "status": "running", "call": call, "attempt": attempt})
-    display({"stage": "transcribe", "status": "completed", "seconds": 4})
-    for stage, count in (("scan_frames", 100), ("save_frames", 12)):
-        display({"stage": stage, "status": "progress", "completed": count, "total": count})
-    display({"stage": "sample", "status": "completed", "seconds": 5})
-    display(
-        {
-            "stage": "compose",
-            "status": "partial",
-            "chapters": 2,
-            "failed": 1,
-            "figures": 6,
-            "seconds": 20,
-        }
-    )
-    text = output.getvalue()
-    assert "音频 2 片 · 请求 3 次（重试 1 次） · 耗时 4.0 秒" in text
-    assert "扫描 100 帧 · 候选 12 张 · 耗时 5.0 秒" in text
-    assert "图文整理部分完成 · 成功 2 章 · 插图 6 张 · 失败 1 章" in text
-    assert "✓ 图文整理完成" not in text

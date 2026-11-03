@@ -200,7 +200,7 @@ ASR 请求总量先按窗口上限估算，随后按已完成片段的平均时�
 
 ## DeepSeek 上下文与呈现
 
-DeepSeek 默认使用配置中的 `deepseek-flash`。默认 `deepseek_context="history"` 将成功章节的原始输入、图片和最终回答完整放在新章节之前；历史只用来承接和统一术语，本章仍只允许引用本次提供的证据。`deepseek_context="chapter"` 可改为独立逐章请求；Qwen 和修订始终使用独立请求。
+图文初稿默认使用 `composition_context="history"`，将成功章节的原始输入、图片和最终回答完整放在新章节之前；历史用于承接和统一术语，本章只引用本次提供的证据。`composition_context="chapter"` 改为独立逐章请求。DeepSeek 和 Qwen 共用这项策略；文字修订和复审使用独立请求。当前 TOML 使用 `composition_context`；已有版本清单中的旧字段 `deepseek_context` 在读取基线时映射，原版本保持原样。
 
 `context_token_budget=200000` 是保守的上下文预算，文本用 UTF-8 字节估算、图像按官方每图最多 1024 token，加上固定提示/schema、修复和输出预留。`context_max_megabytes=40` 限制内联图片编码后的请求体。任一预算将超限时整组重置，以既有上章末尾重新衔接；单章也超限时请缩短章节或减少图像。日志的估计量不是账单，Token meter 和 `usage.json` 使用真实服务用量。
 

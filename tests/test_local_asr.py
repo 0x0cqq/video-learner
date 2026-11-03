@@ -4,13 +4,14 @@ from threading import Event
 from types import SimpleNamespace
 
 import pytest
-from test_conversion import DeterministicProvider
+from model_fakes import DeterministicGenerator
 
 from video_learner.common.config import Config
 from video_learner.common.core import TaskError
 from video_learner.common.storage import Events
 from video_learner.providers.local_asr import LocalASR
-from video_learner.workflows.conversion import convert, extraction_hash
+from video_learner.workflows.conversion import convert
+from video_learner.workflows.versions import extraction_hash
 
 
 def test_local_consumes_lazy_output_and_propagates_failure(tmp_path):
@@ -60,7 +61,7 @@ def test_local_conversion_reuses_windows_without_cloud_key(video, tmp_path, monk
     monkeypatch.setattr("video_learner.providers.local_asr.validate_local_config", lambda _: None)
     config = Config(asr_backend="local", jobs=2)
     output = tmp_path / "local"
-    convert(video, output, config, start_us=1_000_000, provider=DeterministicProvider())
+    convert(video, output, config, start_us=1_000_000, generator=DeterministicGenerator())
     book = read_json(output / "notes.json")
     assert book["transcript"][0]["start_us"] == 1_000_000
     assert book["transcript"][0]["alignment"] == "audio_window"

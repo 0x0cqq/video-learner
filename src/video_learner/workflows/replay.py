@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from video_learner.common.config import Config
+from video_learner.common.config import load_config
 from video_learner.common.core import InputError, TaskError, contained
 from video_learner.common.schemas import CompositionInput, Draft, Notebook, ReviewResult
 from video_learner.common.storage import digest, read_json
@@ -24,7 +24,7 @@ def replay_conversion(workdir: Path) -> Notebook:
     evidence_path = contained(root, ".work/evidence.json")
     if not evidence_path.is_file():
         raise InputError("该转换没有冻结的模型前证据，无法离线重建")
-    config = Config.model_validate(manifest["config"])
+    config = load_config(base=manifest["config"])
     book = Notebook.model_validate(read_json(evidence_path))
     for chapter in book.chapters:
         recorded = CompositionInput.model_validate(
@@ -110,7 +110,7 @@ def replay_review(root: Path, revision_id: str, version: dict) -> Notebook:
     record = contained(root, f".work/reviews/{version['review_record']}")
     fixed = Notebook.model_validate(read_json(record / "baseline.json"))
     baseline = (record / "baseline.md").read_bytes()
-    config = Config.model_validate(read_json(record / "config.json"))
+    config = load_config(base=read_json(record / "config.json"))
     book, current = fixed.model_copy(deep=True), baseline
     steps = config.review_steps if "review_steps" in version else [None]
     if "review_steps" in version and version["review_steps"] != [s.name for s in steps]:

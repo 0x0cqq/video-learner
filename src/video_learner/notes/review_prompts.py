@@ -7,25 +7,29 @@ from video_learner.notes.prompts import (
     FIDELITY_RULES,
     FIGURE_RULES,
     REVIEW_RULES,
+    SOURCE_STRUCTURE_RULES,
 )
 
 COMMON = "\n".join(
     (
         "你是独立的中文讲义审阅者，对照当前讲义与原课证据，返回 ReviewResult JSON。",
         EVIDENCE_RULES,
+        SOURCE_STRUCTURE_RULES,
         FIDELITY_RULES,
         REVIEW_RULES,
         EXAMPLES,
         r"""【审阅与输出】
 current_markdown 是用户当前文稿，优先于 chapter 中可能尚未同步的 body；保留手改意图。
-有明确证据支持时局部纠正；证据不足时用 action=report，说明具体断言与需回看确认的内容。
+有明确证据支持时局部纠正；关键内容存在真实冲突且证据不足时才用 action=report。
 文字可以引用本章图片，图文互补不要求语音逐字复述画面。正常内容保留，没有问题时 findings=[]。
 findings 包含原块 target_id、kind、具体 reason、本章 evidence_ids、action 和 blocks。
+所有 target_id（包括 report）从 chapter.blocks 的 id 原样复制，不用章节 id 或自行拼接的 id。
 replace 用 blocks 替换原块，空列表删除；insert_after 插在该块后；report 仅登记疑点，blocks=[]。
 同一块最多一次修改。正文使用普通 Markdown，内部 ID 只填结构字段；路径、时间戳和锚点
 由程序生成，原课代码中的路径与时间常量可保留。正文禁止 ![](...) 图片语法，LaTeX 正确转义。
-current_review 每项有 id；应用模式下，证据确认已解决的项或符合上述排除范围的无效提示，
-将 id 放入 resolved_review_ids，未提及的疑点保留；新增 report 与已有问题避免重复。
+逐项处理 current_review：证据已确认、归属已明确、只是编辑说明或不影响理解的细节，
+应用模式下将其 id 放入 resolved_review_ids。只保留符合疑点标准的真实未决问题，
+不重复复制已有疑点到 findings。reason 是审阅记录，不把它粘贴到正文或图注。
 """,
     )
 )
@@ -45,12 +49,15 @@ related_block_id 指向保留的原文字块表示放在其后，指向原图片
 
 CONTENT = """本轮职能：讲义内容。对照证据检查对象、条件、术语、代码符号、原文引语、
 材料与评价归属、关键步骤和逻辑方向；纠正文体时保留原有信息与推理。
-检查跨章半句、重复论述、生成过程说明、内部证据 ID、空标题和堆砌界面字段。
-在证据支持的完整观点处收束，后章已续接时不报告假缺失。图片或图注的问题仅报告。
+检查跨章半句、重复抄屏、口语堆放、生成过程说明、内部证据 ID、空标题和堆砌界面字段。
+把“待验证”“语音如此”“需回看”等编辑说明从正文移出；已有证据能解决的直接修正，
+无关细节省去，清楚归属于讲者的观点正常保留，不把整段改成疑点或另造提纲。
+在证据支持的完整观点处收束，后章已续接时不报告假缺失。图片或图注的关键问题只报告。
 """
 
 CONTENT_APPLY = """【内容应用契约】
-frames=null，保留图片的位置、选择和图注。findings 只修改文字块，替换和插入只返回 text 块。
+frames=null，保留图片的位置、选择和图注。replace/insert_after 的 target_id 指向原 text 块，
+且只返回 text 块；图片块（含其图注）只可 report、blocks=[]，不替换成文字或用作插入目标。
 """
 
 

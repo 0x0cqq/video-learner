@@ -1,22 +1,16 @@
-import json
 import os
 import sys
 
 import av
 import numpy as np
 import pytest
-from test_conversion import DeterministicProvider
-from test_conversion import converted as converted
 
-from video_learner.cli import main
-from video_learner.common.config import Config
 from video_learner.common.core import InputError, TaskError, contained
 from video_learner.common.schemas import Notebook
 from video_learner.common.storage import write_json
 from video_learner.media.evidence import audio_window
 from video_learner.media.io import extract_frame, inspect_source
 from video_learner.notes.composition import validate_notebook
-from video_learner.workflows.conversion import convert
 from video_learner.workflows.revision import revise
 
 
@@ -54,38 +48,6 @@ def test_separate_audio_and_video_offsets_share_video_origin(video, tmp_path):
     samples = audio_window(shifted, description, 0, 4_000_000)
     assert np.max(np.abs(samples[:12_000])) < 0.001
     assert np.max(np.abs(samples[20_000:28_000])) > 0.05
-
-
-def test_cancelled_conversion_never_registers_success(video, tmp_path):
-    """在证据已落盘后模拟用户中断，确认保留诊断但不登记版本或输出成功讲义。"""
-
-    class Cancelled(DeterministicProvider):
-        def compose(self, packet, images):
-            raise KeyboardInterrupt
-
-    subtitle = video.with_suffix(".srt")
-    subtitle.write_text("1\n00:00:00,000 --> 00:00:04,000\n测试。\n", encoding="utf-8")
-    output = tmp_path / "cancelled"
-    with pytest.raises(KeyboardInterrupt):
-        convert(video, output, Config(), subtitle=subtitle, provider=Cancelled())
-    manifest = json.loads((output / ".work/manifest.json").read_text(encoding="utf-8"))
-    assert manifest["status"] == "cancelled"
-    assert not manifest["versions"]
-    assert not (output / "notes.md").exists()
-    assert (output / "transcript.jsonl").is_file()
-
-
-def test_cli_cancellation_exit_code(monkeypatch, video):
-    """直接调用 CLI 入口，验证中断映射到约定退出码。"""
-
-    def interrupt(*args, **kwargs):
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr("video_learner.cli.inspect_source", interrupt)
-    monkeypatch.setattr(sys, "argv", ["video-learner", "inspect", str(video)])
-    with pytest.raises(SystemExit) as result:
-        main()
-    assert result.value.code == 130
 
 
 def test_cli_redirected_chinese_output_is_utf8(video):

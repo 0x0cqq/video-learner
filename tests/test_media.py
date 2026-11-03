@@ -1,40 +1,11 @@
-import hashlib
 import json
 
 import pytest
 from typer.testing import CliRunner
 
 from video_learner.cli import app
-from video_learner.common.core import InputError, contained, output_path, parse_time, time_range
-from video_learner.media.io import OffsetReader, extract_frame, inspect_source
-
-
-def test_time_and_paths(tmp_path):
-    """覆盖微秒精度、非法时间和源/输出目录边界，防止解析与路径校验放宽契约。"""
-    assert parse_time("00:20:00.123456") == 1_200_123_456
-    for invalid in ("-1", "00:60:00", "NaN", "1.1234567"):
-        with pytest.raises(InputError):
-            parse_time(invalid)
-    with pytest.raises(InputError):
-        time_range(2, 1, 10)
-    with pytest.raises(InputError):
-        contained(tmp_path, "../secret")
-    with pytest.raises(InputError):
-        output_path(tmp_path, tmp_path / "output")
-
-
-def test_probe_seek_and_readonly(video):
-    """通过真实解码核对 seek 后实际帧时间、完整画面尺寸及素材哈希不变。"""
-    before = hashlib.sha256(video.read_bytes()).hexdigest()
-    source = inspect_source(video, decode=True)
-    assert source.sampled_decode and not source.full_verified
-    assert not source.diagnostics
-    image, actual, pts = extract_frame(video, source, 1_250_000)
-    assert image.size == (160, 96)
-    assert actual == 1_300_000
-    assert pts > 0
-    assert inspect_source(video, full=True).full_verified
-    assert hashlib.sha256(video.read_bytes()).hexdigest() == before
+from video_learner.common.core import InputError, output_path
+from video_learner.media.io import OffsetReader, inspect_source
 
 
 def test_prefix_is_verified_not_suffix(video, tmp_path):

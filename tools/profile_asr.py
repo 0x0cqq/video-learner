@@ -13,8 +13,8 @@ from video_learner.common.core import US, output_path, parse_time, time_range
 from video_learner.common.storage import Events, write_json
 from video_learner.media.evidence import save_transcript
 from video_learner.media.io import inspect_source
-from video_learner.providers.asr import transcribe
 from video_learner.providers.local_asr import LocalASR
+from video_learner.workflows.transcription import transcribe
 
 
 def main() -> None:

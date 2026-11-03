@@ -110,7 +110,7 @@ class Config(Record):
     max_images_per_chapter: int = Field(default=12, ge=1, le=30)
     image_change_threshold: float = Field(default=0.035, ge=0, le=1)
     model: str = "deepseek-flash"
-    deepseek_context: Literal["history", "chapter"] = "history"
+    composition_context: Literal["history", "chapter"] = "history"
     context_token_budget: int = Field(default=200_000, ge=16_000, le=900_000)
     context_max_megabytes: int = Field(default=40, ge=1, le=40)
     api_key_env: str = Field(default="DEEPSEEK_API_KEY", pattern=r"^[A-Za-z_][A-Za-z_0-9]*$")
@@ -145,6 +145,9 @@ def load_config(path: Path | None = None, *, base: dict | None = None, **overrid
     """
     try:
         data = dict(base) if base is not None else {}
+        # 已发布版本保存过旧字段名；仅在读取基线时映射，当前 TOML 使用通用名称。
+        if "deepseek_context" in data:
+            data["composition_context"] = data.pop("deepseek_context")
         if path:
             data = merge_provider_settings(data, tomllib.loads(path.read_text(encoding="utf-8")))
         data = merge_provider_settings(data, overrides)

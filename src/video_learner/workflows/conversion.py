@@ -9,7 +9,7 @@ from pathlib import Path
 
 from video_learner.common.config import Config
 from video_learner.common.core import InputError, TaskError, contained, output_path, time_range
-from video_learner.common.schemas import Notebook, ReviewItem, Source
+from video_learner.common.schemas import Notebook, ReviewItem
 from video_learner.common.storage import (
     Events,
     atomic_bytes,
@@ -22,57 +22,18 @@ from video_learner.common.usage import summarize_usage
 from video_learner.exports import export_book
 from video_learner.exports.pdf import font_path
 from video_learner.media.evidence import load_subtitles, sample_frames, save_transcript
-from video_learner.media.io import inspect_source, source_file, track_of
+from video_learner.media.io import inspect_source, track_of
 from video_learner.notes.composition import (
     apply_chapter_draft,
     composition_input,
     plan_chapters,
     validate_notebook,
 )
-from video_learner.providers.asr import transcribe, validate_asr_config
-from video_learner.providers.base import (
-    PROMPT_VERSION,
-    Provider,
-    create_provider,
-    validate_provider_config,
-)
-
-EXTRACTION_FIELDS = {
-    "asr_language",
-    "asr_qwen_model",
-    "asr_window_seconds",
-    "sample_seconds",
-    "chapter_seconds",
-    "max_images_per_chapter",
-    "image_change_threshold",
-}
-
-
-def extraction_hash(config: Config) -> str:
-    """只对影响证据提取的配置求指纹，允许修订时更换图文模型而复用原始证据。"""
-    fields = config.model_dump(include=EXTRACTION_FIELDS)
-    if config.asr_backend == "local":
-        fields.update(
-            config.model_dump(
-                include={
-                    "asr_backend",
-                    "asr_device",
-                    "asr_local_model",
-                    "asr_beam_size",
-                }
-            )
-        )
-    return canonical_hash(fields)
-
-
-def fingerprint_source(path: Path, source: Source, subtitle: Path | None = None) -> dict:
-    """为实际使用的媒体、显式字幕及课程元数据生成绝对路径到内容哈希的映射。"""
-    files = {source_file(path, track).resolve() for track in source.tracks}
-    if subtitle:
-        files.add(subtitle.resolve())
-    if path.is_dir() and (path / "videoInfo.json").is_file():
-        files.add((path / "videoInfo.json").resolve())
-    return {str(file): digest(file) for file in sorted(files)}
+from video_learner.notes.generation import Generator, create_generator
+from video_learner.notes.prompts import PROMPT_VERSION
+from video_learner.providers.base import validate_provider_config
+from video_learner.workflows.transcription import transcribe, validate_asr_config
+from video_learner.workflows.versions import extraction_hash, fingerprint_source
 
 
 def convert(
@@ -83,7 +44,7 @@ def convert(
     end_us: int | None = None,
     subtitle: Path | None = None,
     progress: Callable[[dict], None] | None = None,
-    provider: Provider | None = None,
+    generator: Generator | None = None,
     usage_report: Callable[[dict], None] | None = None,
     force: bool = False,
     pdf_font: Path | None = None,
@@ -113,7 +74,7 @@ def convert(
             end_us,
             source.duration_us,
         )
-    if provider is None:
+    if generator is None:
         validate_provider_config(config)
     if subtitle_segments is None:
         validate_asr_config(config, start_us, end_us)
@@ -230,7 +191,14 @@ def convert(
                 manifest["chapters"] = [c.model_dump() for c in book.chapters]
                 write_json(contained(staging, ".work/manifest.json"), manifest)
                 write_json(contained(staging, ".work/evidence.json"), book.model_dump())
-            active_provider = provider or create_provider(config, events)
+            owned_generator = (
+                create_generator(
+                    config, events, response_directory=contained(staging, ".work/model-responses")
+                )
+                if generator is None
+                else None
+            )
+            active_generator = generator if generator is not None else owned_generator
             compose_started = time.monotonic()
             for index, chapter in enumerate(book.chapters, 1):
                 events.emit(
@@ -248,7 +216,7 @@ def convert(
                             contained(staging, f".work/composition-inputs/{chapter.id}.json"),
                             frozen.model_dump(),
                         )
-                        draft = active_provider.compose(frozen.packet, images)
+                        draft = active_generator.compose(frozen.packet, images)
                         apply_chapter_draft(book, chapter, frozen.packet, draft)
                         write_json(
                             contained(staging, f".work/composition-drafts/{chapter.id}.json"),
@@ -311,13 +279,15 @@ def convert(
                 from video_learner.workflows.reviewing import review_version
 
                 events.path = contained(target, ".work/logs/events.jsonl")
+                if owned_generator is not None:
+                    owned_generator.response_directory = contained(target, ".work/model-responses")
                 try:
                     return review_version(
                         target,
                         "r001",
                         config,
                         events,
-                        active_provider,
+                        active_generator,
                         pdf_font=pdf_font,
                     )
                 except (TaskError, InputError) as exc:

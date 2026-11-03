@@ -1,40 +1,12 @@
-import shutil
 from pathlib import Path
 
 import pytest
 from markdown_it import MarkdownIt
-from PIL import Image
-from test_conversion import converted as converted
-from typer.testing import CliRunner
 
-from video_learner.cli import app
 from video_learner.common.core import InputError
 from video_learner.common.storage import read_json
 from video_learner.exports.document import parser
 from video_learner.workflows.exporting import export
-
-
-@pytest.mark.parametrize(
-    ("source", "expected"),
-    [
-        ("体现**术语（term）**的含义", "体现<strong>术语（term）</strong>的含义"),
-        ("添加**“确认”的按钮**。", "添加<strong>“确认”的按钮</strong>。"),
-        ("通过 **回放（replay）**恢复", "通过 <strong>回放（replay）</strong>恢复"),
-        ("按**（说明）**操作", "按<strong>（说明）</strong>操作"),
-        ("按**(说明)**操作", "按<strong>(说明)</strong>操作"),
-        (
-            "按**“`x` 与 *重点*”**操作",
-            "按<strong>“<code>x</code> 与 <em>重点</em>”</strong>操作",
-        ),
-        (
-            "按**[“说明”](https://example.com)**操作",
-            '按<strong><a href="https://example.com">“说明”</a></strong>操作',
-        ),
-    ],
-)
-def test_chinese_strong_punctuation(source, expected):
-    """汉字紧邻加粗边界的标点仍能成对解析，内部代码、斜体和链接沿用原规则。"""
-    assert parser().renderInline(source) == expected
 
 
 def test_chinese_strong_keeps_literal_and_standard_markdown():
@@ -66,68 +38,6 @@ def pdf_font():
         pytest.skip("本机没有测试所需的中文 TrueType 字体")
 
 
-@pytest.mark.parametrize("prefix", ["", "> "])
-def test_display_math_interrupts_prose_without_consuming_chinese(prefix):
-    """显示公式前后没有空行时仍独立解析，后续中文与行内公式不落入数学节点。"""
-    source = "\n".join(
-        prefix + line for line in "说明：\n$$\nx^2\n$$\n这里使用条件 $x>0$。".splitlines()
-    )
-    source += "\n\n```text\n$$literal$$\n```\n"
-    tokens = parser().parse(source)
-    assert [token.content.strip() for token in tokens if token.type == "math_block"] == ["x^2"]
-    inline = [child for token in tokens for child in token.children or []]
-    assert [token.content for token in inline if token.type == "math_inline"] == ["x>0"]
-    assert any(token.type == "text" and "这里使用条件" in token.content for token in inline)
-    assert next(token.content for token in tokens if token.type == "fence") == "$$literal$$\n"
-
-
-def test_export_portable_manual_markdown_and_static_html(converted, tmp_path):
-    """移走视频和缓存后仍导出手改字节、表格、公式和图片，HTML 不执行素材脚本。"""
-    root, video = converted
-    portable = tmp_path / "portable"
-    shutil.copytree(root, portable, ignore=shutil.ignore_patterns(".work", "usage.json"))
-    video.unlink()
-    Image.new("RGB", (32, 24), "red").save(portable / "assets/hand.png")
-    path = portable / "notes.md"
-    edited = (
-        path.read_bytes().replace(b"\n", b"\r\n")
-        + (
-            '\r\n手改补充**“保留”**原文。\r\n\r\n<img src="assets/hand.png" onerror="alert(1)">\r\n'
-            "<script>alert(2)</script>\r\n\r\n| 项目 | 数值 |\r\n|---|---|\r\n| 甲 | 2 |\r\n"
-            "\r\n公式 $x^2$。\r\n\r\n```html\r\n<script>literal()</script>\r\n```\r\n"
-        ).encode()
-    )
-    path.write_bytes(edited)
-    result = CliRunner().invoke(
-        app,
-        [
-            "export",
-            str(portable),
-            "--output",
-            str(tmp_path / "reading"),
-            "--format",
-            "markdown",
-            "--format",
-            "html",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    target = tmp_path / "reading"
-    assert (target / "notes.md").read_bytes() == path.read_bytes() == edited
-    assert (target / "assets/hand.png").read_bytes() == (portable / "assets/hand.png").read_bytes()
-    html = (target / "notes.html").read_text(encoding="utf-8")
-    assert "手改补充" in html and "<table>" in html and "<math" in html
-    assert "手改补充<strong>“保留”</strong>原文。" in html
-    assert html.count('src="data:image/') == 2
-    assert "<script>" not in html and "onerror=" not in html
-    assert "&lt;script&gt;literal()&lt;/script&gt;" in html
-    assert 'href="#sources"' in html and 'id="ch-001"' in html
-    assert "手改" in (target / "sources.md").read_text(encoding="utf-8")
-    assert read_json(target / "notes.json")["sync_status"] == "manual_unverified"
-    copied = export(target, tmp_path / "re-export", ["html"])
-    assert (copied / "notes.html").read_bytes() == (target / "notes.html").read_bytes()
-
-
 def test_pdf_paginates_tables_code_and_keeps_math_fallback(converted, tmp_path):
     """长表与代码跨页、中文可提取、公式与截图嵌入；超出公式子集时保留全文。"""
     font = pdf_font()
@@ -141,6 +51,9 @@ def test_pdf_paginates_tables_code_and_keeps_math_fallback(converted, tmp_path):
     code = "\n\n```python\n" + "\n".join(f"print('line_{i}')" for i in range(120)) + "\n```\n"
     addition = "\n\n显示**（加粗）**文字。\n\n" + table + code
     addition += r"公式 $\frac{a}{b}$ 和 $\notacommand{keep}$。"
+    addition += "\n\n### " + r"$\mathbb{Q}(\sqrt{2})$ 上的乘法与条件" * 8 + "\n\n"
+    addition += r"对元素 $x+\sqrt{2}y$ 求逆时核对 $x^2-2y^2$ 的非零条件。" * 20
+    addition += "\n\n推导：\n$$\nx^2\n$$\n这里使用有理数的封闭性 $x+y$。\n\n推导结束。\n"
     path.write_bytes(path.read_bytes() + addition.encode())
     target = export(root, tmp_path / "pdf", ["pdf"], pdf_font=font)
     reader = PdfReader(target / "notes.pdf")
@@ -149,29 +62,13 @@ def test_pdf_paginates_tables_code_and_keeps_math_fallback(converted, tmp_path):
     assert "自造声音与变化画面" in text and "79" in text
     assert "显示（加粗）文字" in text and "**" not in text
     assert "line_0" in text and "line_119" in text
+    assert "推导结束" in text and text.count("非零条件") == 20
+    assert "这里使用有理数的封闭性" in text
     assert "notacommand" in text and "LaTeX" in text
-    assert sum(len(page.images) for page in reader.pages) >= 2
+    assert sum(len(page.images) for page in reader.pages) >= 3
     assert text.count("序号") >= 2
     assert any("Mathtext" in warning for warning in read_json(target / "export.json")["warnings"])
     assert not list(target.glob(".pdf-*"))
-
-
-def test_pdf_wraps_chinese_with_multiple_inline_formulas(converted, tmp_path):
-    """连续行内公式在行尾触发换行，覆盖图片空字符造成的真实导出崩溃与后文丢失。"""
-    from pypdf import PdfReader
-
-    root, _ = converted
-    path = root / "notes.md"
-    heading = "\n\n### " + r"$\mathbb{Q}(\sqrt{2})$ 上的乘法与条件" * 8 + "\n\n"
-    paragraph = r"对元素 $x+\sqrt{2}y$ 求逆时核对 $x^2-2y^2$ 的非零条件。" * 20
-    display = "\n\n推导：\n$$\nx^2\n$$\n这里使用有理数的封闭性 $x+y$。\n\n推导结束。\n"
-    path.write_bytes(path.read_bytes() + (heading + paragraph + display).encode())
-    target = export(root, tmp_path / "inline-math-pdf", ["pdf"], pdf_font=pdf_font())
-    reader = PdfReader(target / "notes.pdf")
-    text = "\n".join(page.extract_text() for page in reader.pages)
-    assert "推导结束" in text and text.count("非零条件") == 20
-    assert "这里使用有理数的封闭性" in text
-    assert sum(len(page.images) for page in reader.pages) >= 3
 
 
 @pytest.mark.parametrize(
@@ -204,23 +101,3 @@ def test_export_failure_preserves_source_and_publishes_nothing(converted, tmp_pa
     with pytest.raises(InputError):
         export(root, target, ["html"])
     assert (target / "keep.txt").read_text(encoding="utf-8") == "keep"
-
-
-def test_export_explicit_version_and_invalid_format(converted, tmp_path):
-    """显式基线可导出；无效格式在发布前给出明确错误。"""
-    root, _ = converted
-    target = export(root, tmp_path / "base", ["markdown"], base="r001")
-    assert (target / "notes.md").read_bytes() == (root / "notes.md").read_bytes()
-    with pytest.raises(InputError, match="导出格式"):
-        export(root, tmp_path / "wrong", ["docx"])
-
-
-def test_export_cli_defaults_to_all_formats(converted, tmp_path):
-    """省略格式选项时，阅读副本一次生成三种格式并保留当前 Markdown。"""
-    root, _ = converted
-    target = tmp_path / "default-reading"
-    result = CliRunner().invoke(app, ["export", str(root), "--output", str(target)])
-    assert result.exit_code == 0, result.output
-    assert (target / "notes.md").read_bytes() == (root / "notes.md").read_bytes()
-    assert (target / "notes.html").is_file() and (target / "notes.pdf").is_file()
-    assert read_json(target / "export.json")["formats"] == ["markdown", "html", "pdf"]

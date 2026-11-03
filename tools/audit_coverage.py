@@ -15,7 +15,7 @@ def coverage_report(root: Path, revision: str = "r001") -> dict:
     record_id = None
     review_steps = []
     if revision != "r001":
-        from video_learner.workflows.revision import load_baseline
+        from video_learner.workflows.versions import load_baseline
 
         manifest, _, book, _ = load_baseline(root, revision)
         record_id = manifest["versions"][revision].get("review_record")

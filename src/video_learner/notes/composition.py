@@ -2,6 +2,7 @@
 
 from fractions import Fraction
 from pathlib import Path
+from typing import Literal
 
 from PIL import Image
 
@@ -164,11 +165,21 @@ def freeze_composition_input(
     )
 
 
-def validate_draft(draft: Draft, packet: dict, *, check_editorial: bool = True) -> None:
+def validate_draft(
+    draft: Draft,
+    packet: dict,
+    *,
+    check_editorial: bool = True,
+    target_kind: Literal["text", "figure"] | None = None,
+) -> None:
     """检查草稿的证据边界、块类型、补充授权及正文结构；违规抛 TaskError。
 
-    检查的是引用和结构合法性；图文轮和只报告轮可将正文文体检查留给内容轮。
+    单块修订同时约束数量和类型；应用旧冻结草稿时由目标块提供类型。
+    图文轮和只报告轮可将正文文体检查留给内容轮。
     """
+    kind = target_kind or packet.get("target_block_kind")
+    if kind is not None and (len(draft.blocks) != 1 or draft.blocks[0].kind != kind):
+        raise TaskError("单块修订必须返回一个相同类型的块")
     transcripts = {s["id"]: s for s in packet["transcript"]}
     frames = {f["id"]: f for f in packet["frames"]}
     available = transcripts.keys() | frames.keys()
@@ -243,15 +254,13 @@ def apply_revision_draft(
     """只依据冻结证据和草稿替换修订目标，并保留范围外内容及疑点。"""
     from video_learner.notes.rendering import render_block, render_chapter
 
-    validate_draft(draft, packet)
+    validate_draft(draft, packet, target_kind=target_block.kind if target_block else None)
     replaced_ids = (
         {chapter.id, *(block.id for block in chapter.blocks)}
         if target_block is None
         else {target_block.id}
     )
     if target_block:
-        if len(draft.blocks) != 1 or draft.blocks[0].kind != target_block.kind:
-            raise TaskError("单块修订必须返回一个相同类型的块")
         updated = NoteBlock(
             **draft.blocks[0].model_dump(), id=target_block.id, chapter_id=chapter.id
         )

@@ -12,11 +12,11 @@
 | --- | --- |
 | 环境 | Python 3.12、uv、uv.lock；Windows 为首个验证平台 |
 | CLI | Typer/Rich，参数、错误提示与 stderr 阶段进度；详细模式见[使用指南](usage.md#终端进度与详细日志) |
-| 应用 | workflows/conversion.py 编排转换，workflows/revision.py 编排修订，workflows/replay.py 离线核对已完成结果，workflows/exporting.py 发布阅读副本；不依赖 Typer 对象 |
+| 应用 | workflows 编排转换、转写、修订、复审、只读重放和阅读导出；versions.py 共用工作目录与版本规则；不依赖 Typer 对象 |
 | 媒体 | PyAV，只读偏移流、轨道探测、seek、音频重采样 |
 | 图片 | Pillow/NumPy，全帧灰度变化、周期候选覆盖 |
 | ASR | 默认 Qwen，可选 faster-whisper CPU/CUDA，共用有界音频切片 |
-| 多模态 | DeepSeek deepseek-flash / Qwen qwen3.8-flash，窄 Provider.compose 接口 |
+| 多模态 | DeepSeek deepseek-flash / Qwen qwen3.8-flash，单次 Provider.generate 接口与共用讲义生成层 |
 | 文档 | Pydantic、证据包与草稿的确定性应用、Markdown 渲染、字节范围替换、资源解析 |
 | 导出 | ExportDocument 共享快照；Markdown、HTML、PDF 三个函数适配器 |
 | 状态 | JSON、内容指纹、快照、临时目录、OS 文件锁 |
@@ -30,13 +30,13 @@
 
 | 顺序 | 源码与数据变化 | 保存的结果 |
 | --- | --- | --- |
-| 1. 检查与准备 | `media/io.py:inspect_source()` 产生 `Source`；`conversion.py:fingerprint_source()` 核对实际媒体、元数据和显式字幕 | `.work/source-local.json` 保存本机来源与文件哈希；`.work/manifest.json` 保存运行状态、范围和配置；`.work/logs/events.jsonl` 追加阶段事件 |
-| 2. 转写 | `providers/asr.py:transcribe()` 调用 `media/evidence.py:audio_window()`，按真实音频窗口取得 `TranscriptSegment`；显式 SRT/VTT 则由 `load_subtitles()` 提供片段 | `transcript.jsonl` 保存逐条转写证据；ASR 路径另存 `.work/audio/audio-*.wav`、同名 `.json` 时间映射及 `.work/asr-responses/audio-*.json` 识别文本；字幕路径另存 `.work/subtitle-check.json` |
+| 1. 检查与准备 | `media/io.py:inspect_source()` 产生 `Source`；`versions.py:fingerprint_source()` 核对实际媒体、元数据和显式字幕 | `.work/source-local.json` 保存本机来源与文件哈希；`.work/manifest.json` 保存运行状态、范围和配置；`.work/logs/events.jsonl` 追加阶段事件 |
+| 2. 转写 | `workflows/transcription.py:transcribe()` 调用 `media/evidence.py:audio_window()`，按真实音频窗口取得 `TranscriptSegment`；显式 SRT/VTT 则由 `load_subtitles()` 提供片段 | `transcript.jsonl` 保存逐条转写证据；ASR 路径另存 `.work/audio/audio-*.wav`、同名 `.json` 时间映射及 `.work/asr-responses/audio-*.json` 识别文本；字幕路径另存 `.work/subtitle-check.json` |
 | 3. 候选画面 | `media/evidence.py:sample_frames()` 扫描变化，`register_frame()` 登记实际 PTS、时间、图片路径和哈希，形成 `FrameEvidence` | `.work/frame-scan.json`、`.work/frames.json` 与 `.work/frames/frame-*.png`；这些是候选完整帧 |
 | 4. 章节与模型前证据 | `notes/composition.py:plan_chapters()` 划分连续范围；`composition_input()` 从当前 `Notebook` 构造逐章证据包 | `.work/evidence.json` 保存整理前的转写、候选帧和章节计划；每章调用前写入 `.work/composition-inputs/ch-*.json`，包含实际证据包与图片身份 |
-| 5. 模型与草稿应用 | `providers/base.py:Provider.compose()` 取得 `Draft`；`notes/composition.py:apply_chapter_draft()` 校验并应用草稿，分配章节内的稳定块 ID | `.work/model-responses/<随机ID>.json` 保存完整返回的最终正文，包含可能未通过校验的响应；`.work/composition-drafts/ch-*.json` 只保存已采用草稿；`.work/composed.json` 逐章更新讲义状态 |
+| 5. 模型与草稿应用 | `notes/generation.py:NoteGenerator.compose()` 通过单次供应商接口取得并校验 `Draft`；`notes/composition.py:apply_chapter_draft()` 校验并应用草稿，分配章节内的稳定块 ID | `.work/model-responses/<随机ID>.json` 保存完整返回的最终正文，包含可能未通过校验的响应；`.work/composition-drafts/ch-*.json` 只保存已采用草稿；`.work/composed.json` 逐章更新讲义状态 |
 | 6. 校验与发布 | `validate_notebook()` 检查时间、引用和图片；`exports:export_book()` 生成三种格式与资源；`convert()` 复核源素材指纹后提交目录 | `notes.md`、`notes.html`、`notes.pdf`、`sources.md`、`review.md`、`notes.json`、`source.json`、`export.json`、`assets/`；`.work/versions/r001.generated.md` 保存 Markdown 字节快照，清单登记成功版本；`usage.json` 汇总本次用量 |
-| 7. 独立复审 | `notes/reviewing.py:review_input()` 冻结基线和原证据；`Provider.review()` 返回逐图判断及局部修改；`apply_review_pass()` 确定性应用 | 默认写入独立 r002；`.work/reviews/` 保存复审基线、逐章输入和结果，可离线重放；原 r001 保留 |
+| 7. 独立复审 | `notes/reviewing.py:review_input()` 冻结基线和原证据；`NoteGenerator.review()` 返回逐图判断及局部修改；`apply_review_pass()` 确定性应用 | 默认写入独立 r002；`.work/reviews/` 保存复审基线、逐章输入和结果，可离线重放；原 r001 保留 |
 
 图文模型逐章串行运行。后一章的证据包可包含已完成前章的末尾，因此每章必须在实际调用前单独冻结输入。章节在转写后规划一次，启动时报告目标章长。ASR 与图文模型输出是外部结果；给定保存的转写、候选帧和已采用 `Draft` 后，章节应用、渲染及固定结果的离线核对由本地代码完成。失败目录保留诊断，不登记成功版本，也不作为 P0 断点恢复入口。
 
@@ -54,7 +54,7 @@
 
 ## 3. 固定证据提取
 
-音频按重采样 PTS 放回 16 kHz 单声道缓冲，保留静音、时间空隙和原课偏移。语音识别默认 Qwen；显式 `asr_backend=local` 使用 faster-whisper。CPU 默认为 small/int8，CUDA 默认为 large-v3-turbo/int8_float16。两者通过 `recognize(wav, cancelled)` 与 `close()` 接口复用切片和保存流程，均按实际窗口引用。权重每次转写加载一次，按需下载；VAD 关闭，保留原始时间映射。CPU 的 `asr_cpu_threads` 控制算子线程，`jobs` 控制 CTranslate2 worker；CUDA 固定单 worker 控制显存。
+`workflows/transcription.py` 负责切片、后端选择、有界并发和证据保存，`media/audio.py` 提供 WAV 编码与停顿切点；识别适配器只接收 WAV 并返回窗口文本。音频按重采样 PTS 放回 16 kHz 单声道缓冲，保留静音、时间空隙和原课偏移。语音识别默认 Qwen；显式 `asr_backend=local` 使用 faster-whisper。CPU 默认为 small/int8，CUDA 默认为 large-v3-turbo/int8_float16。两者通过 `recognize(wav, cancelled)` 与 `close()` 接口复用切片和保存流程，均按实际窗口引用。权重每次转写加载一次，按需下载；VAD 关闭，保留原始时间映射。CPU 的 `asr_cpu_threads` 控制算子线程，`jobs` 控制 CTranslate2 worker；CUDA 固定单 worker 控制显存。
 
 默认使用 `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`，模型默认为 `qwen3-asr-flash`。16 kHz PCM16 WAV 以 Base64 发送，每片默认上限 30 秒，可设 5–60 秒。除尾片外，在窗口末尾 20% 内寻找至少 300 毫秒的低音量停顿（20 毫秒 RMS < 0.01），在最靠后的停顿中点切分；无停顿或全窗安静则保留完整窗口。下一片从实际切点开始，不丢静音、不重叠。固定阈值不等于语音检测，也不保证词句完整。该接口没有句级时间戳，`TranscriptSegment.alignment=audio_window` 表示真实上传区间，精度说明放在 `sources.md`。原始波形、切片映射和响应保存在工作目录。凭据独立、最多 500 次 ASR 调用（含重试），认证/截断直接失败，瞬时错误有界重试；不自动回退其他云服务。[用户指定的 Qwen 接口](https://platform.qianwenai.com/docs/api-reference/speech-recognition/qwen-asr/openai)
 
@@ -70,15 +70,15 @@ ASR 通过 `jobs` 控制有界请求并发，默认 1；切片生成和响应保
 
 ## 4. 多模态适配与证据约束
 
-供应商返回的草稿由 `Draft` / `DraftBlock` 定义，响应 JSON schema 从该契约派生；正文通过结构和证据校验后再转成带稳定 ID 的讲义块。
+讲义生成层 `notes/generation.py` 负责提示词、响应 schema、上下文、调用预算及校验修复，向工作流提供 `compose` / `review`。`providers/base.py` 定义单次 `generate(ModelRequest, call=...) -> ModelResponse`：输入为已选定的系统指令、schema 和完整消息，输出为最终正文、完成状态及用量；DeepSeek、Qwen 分别适配各自协议，统一暴露受控请求错误。草稿由 `Draft` / `DraftBlock` 定义，通过结构和证据校验后转成带稳定 ID 的讲义块。工作流显式传入最终响应的保存目录；初稿发布后更新会话目录，沿用原调用预算，响应落盘与日志位置独立。
 
 图文整理通过 `provider` 选择 DeepSeek 或 Qwen，不调用 OpenAI 服务或自动回退。`openai` 包作为两家服务的兼容客户端。默认 DeepSeek `deepseek-flash`，固定连接 `https://api.deepseek.com`。[DeepSeek 图像接口](https://api-docs.deepseek.com/guides/vision/)
 
-DeepSeek 使用 Responses API 图像输入和 JSON schema 响应。Qwen 使用 Chat Completions，固定连接 `https://dashscope.aliyuncs.com/compatible-mode/v1`，默认 `qwen3.8-flash`；图片以 Base64 `image_url` 发送，schema 同时写入请求格式和系统提示。两者均执行 Pydantic 及跨字段校验。text 块的 frame_id 必须为 null；figure 块必须引用本次提供的 frame ID 并将其包含在证据列表中。同章不重复导出同一截图。复审请求 schema 按职能限定块类型：图文轮为 figure，内容轮为 text；内容和只报告轮的 frames 为 null，只报告轮的 action 为 report、blocks 和 resolved_review_ids 为空。目标块、证据和图片身份继续由本地校验。模型不能控制本地路径、HTML 锚点或来源时间戳。[DeepSeek Responses API](https://api-docs.deepseek.com/api/create-response/)
+DeepSeek 使用 Responses API 图像输入和 JSON schema 响应。Qwen 使用 Chat Completions，固定连接 `https://dashscope.aliyuncs.com/compatible-mode/v1`，默认 `qwen3.8-flash`；图片以 Base64 `image_url` 发送，schema 同时写入请求格式和系统提示。两者均执行 Pydantic 及跨字段校验。text 块的 frame_id 必须为 null；figure 块必须引用本次提供的 frame ID 并将其包含在证据列表中。同章不重复导出同一截图。单块文字或图注修订在证据包中保存 `target_block_kind`，请求 schema 限定一个同类型块，生成校验执行相同规则并在预算内修复数量或类型错误；确定性应用也依据实际目标块校验。复审请求 schema 按职能限定块类型：图文轮为 figure，内容轮为 text；内容和只报告轮的 frames 为 null，只报告轮的 action 为 report、blocks 和 resolved_review_ids 为空。目标块、证据和图片身份继续由本地校验。模型不能控制本地路径、HTML 锚点或来源时间戳。[DeepSeek Responses API](https://api-docs.deepseek.com/api/create-response/)
 
-DeepSeek 默认 `reasoning_effort = "none"`，单次最多 6000 输出 token，任务最多 120 次实际请求、最多 2 次重试，均可在 TOML 调整。SDK 内置重试关闭。输出截断直接失败；临时网络错误及结构/引用错误有界重试；认证和请求配置错误直接报告。日志记录服务返回的输入/输出 token 和耗时；超时请求仍可能计费。[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)
+DeepSeek 默认 `reasoning_effort = "none"`。两家图文模型共用单次最多 6000 输出 token、任务最多 120 次实际请求及最多 2 次重试的配置，均可在 TOML 调整。SDK 内置重试关闭。输出截断直接失败；临时网络错误及结构/引用错误有界重试；认证和请求配置错误直接报告。日志记录服务返回的输入/输出 token 和耗时；超时请求仍可能计费。[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)
 
-DeepSeek 转换默认逐轮追加已成功的原始请求（含图片）与回答，完整保留前缀；修订和 Qwen 保持独立请求。历史只用于术语和承接，引用校验仍仅允许当前包的证据。默认保守上下文预算 200K token、请求体预算 40 MiB，含输出及修复预留；到达边界整组重置，依靠包内上章末尾继续衔接。`deepseek_context=chapter` 可关闭历史。模型用量保留实际缓存 token；估计量只用于边界控制。
+初稿转换通过 `composition_context=history` 逐章追加成功的原始请求（含图片）与回答，完整保留前缀；`chapter` 使用独立逐章请求。两家供应商执行同一策略，文字修订和复审均为独立请求。历史只用于术语和承接，引用校验仍仅允许当前包的证据。生成层默认上下文预算 200K、请求体预算 40 MiB，包含输出和修复预留；文本以 UTF-8 字节数、每张图片以 1024 个本地 token 预算单位估计，达到边界时整组清空历史，由包内上章末尾继续衔接。估计量用于本地预算控制，实际 token 和缓存用量取服务返回值。读取已有版本配置时将旧字段 `deepseek_context` 映射为 `composition_context`，版本文件保持原样。
 
 语义校验失败且带有历史时，修复轮清除历史并列出本章允许的证据 ID，计入原有调用预算。证据包附 is_last_chapter，提示词区分证据分组结束与课程内容缺失，要求核对数学条件、逻辑方向、评价归属及性能比较的负载口径；这些提示不替代内容核对。
 
@@ -90,7 +90,9 @@ Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 tok
 
 正文直接讲解课程内容，不逐图描述或堆放转写。图注允许为空，文字块必须非空；图意自明或已由正文解释时省略图注，不强求每章配图。原课类别、块 ID、来源区间、证据列表和手改同步状态放入 `sources.md`；`review.md` 列出内容疑点并以单条提示标明手改状态。正文仅显式标记 AI 补充和待核对，保留隐藏修订锚点。标题中的行内 LaTeX 保留原命令，标题其余 Markdown 控制字符转义。
 
-提示词版本为 p0-9，`notes/prompts.py` 集中维护生成与复审共用的证据、保真、配图和疑点规则。组织优先级为证据忠实与关键条件完整、教学主线与理解过程、精简与文体。语音说明当前主题和评价归属，相关且清晰的画面用于核对代码、公式、数字和引语的精确内容，先确认对象、版本与操作状态一致。直接引语保留原文，翻译或压缩使用转述；屏幕上的 AI 回答、搜索摘要及他人评论保留材料身份。局部不确定断言独立成块，疑点明确知识点、尚不确定的断言和回看需确认的内容。配图按是否有助于理解或核对当前解释选择，分别保留关键状态。自造表达示例仅说明规则，不作为课程证据。
+提示词版本为 p0-10，`notes/prompts.py` 集中维护生成与复审共用的原课结构、证据、保真、配图和疑点规则。当前正在讲解的原课件、板书或代码提供标题、关键措辞、顺序与论证骨架，语音补充必要解释；纯口述按讲解顺序组织。图文先确认对象、版本与状态一致，再按清晰原文核对术语、代码、公式、数字和引语；听感错误与正确原文合并为准确表述。直接引语保留原文，翻译或压缩使用转述，二手材料和讲者评价保留归属。归属清楚的观点属于原课表达；影响理解或关键结论且当前证据无法解决的断言才独立标记为 uncertain，非关键模糊细节省去。相关原文及演示保留必要完整帧，文字与图片相邻，图注默认留空。自造表达示例仅说明规则，不作为课程证据。
+
+生成请求在证据图片后附明确的成品任务说明，与系统规则共同约束原文结构、客观文体、代表图及疑点范围。相邻转写窗口连续时，片尾未完句按后片续接理解，分组边界本身不作为录音缺失的证据。临时 AI 回答只采用课堂实际讨论的要点并保留材料身份，聊天按钮和状态提示与正文分开；密集难辨清单保留原图与可确认机制。复审逐项处理已有疑点，明确解决证据已确认、归属清楚和不影响理解的无效提示；报告和修改均以本章实际块 ID 为目标，内容轮保留图片及图注。请求和本地校验继续保留真实未决的关键问题，不使用关键词过滤抹去不确定性。
 
 证据包版本 2 用 `boundary_context_not_citable.before/after` 区分边界方向，每张帧的 `speech_window_ids` 指向其实际所在音频窗口。这个关系只表示时间邻近，不表示语义匹配，也不创造句级时间戳。正文确定性检查拒绝当前证据 ID 泄漏和章节末尾空标题，保留代码围栏中的字面示例；旧冻结包按原契约离线重建。
 
@@ -100,7 +102,7 @@ Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 tok
 
 `ReviewStep` 包含唯一名称、职能、用户 `instruction` 和 `mode=apply|report`，配置列表整体替换默认列表。图文轮允许选图、移动图片及纠正已有图注；内容轮仅修改文字，仍可读图核对正文。报告模式只增加疑点。职能边界在本地校验，自定义规则仍受证据和写入范围约束；配置方法见[使用指南](usage.md#独立复审)。
 
-单轮函数接口为 `(packet, images) -> ReviewResult`，默认调用 `Provider.review`；嵌入 Python 时可向 `workflows.reviewing.review(..., reviewers={"content": check_content})` 注入同接口函数，按步骤名称覆盖。未知名称在执行前报错；未覆盖的步骤沿用模型。`notes/review_prompts.py` 在共用规则上组合职能与操作模式，逐图决策和内容替换契约仅加入应用模式，只报告模式要求 `frames=null` 与 `report`。供应商仅负责请求和有界修复，流程顺序迭代配置列表。
+单轮函数接口为 `(packet, images) -> ReviewResult`，默认调用 `NoteGenerator.review`；嵌入 Python 时可向 `workflows.reviewing.review(..., reviewers={"content": check_content})` 注入同接口函数，按步骤名称覆盖。未知名称在执行前报错；未覆盖的步骤沿用模型。`notes/review_prompts.py` 在共用规则上组合职能与操作模式，逐图决策和内容替换契约仅加入应用模式，只报告模式要求 `frames=null` 与 `report`。生成层负责模型调用和有界修复，供应商执行单次请求，工作流顺序迭代配置列表。
 
 `ReviewResult` 包含可选逐图决定 `frames`、局部 `findings` 和 `resolved_review_ids`。`frames=null` 保留全部图片；图文应用轮须完整评估候选，采用图的落点为文字块时放在其后，为已有图片块时沿用原位置。新增图默认无图注。文字替换/插入只作用于目标块，证据必须属于本次范围；图文轮的图注替换保持同一 frame_id。`apply_review_pass()` 是纯函数，返回新 Notebook 和 Markdown，输入对象不变；按稳定块 ID 只拼接变化范围，移动原图保留手改图注与其他非目标字节。新增块 ID 包含步骤名，连续插入不会互相覆盖。
 
@@ -118,7 +120,7 @@ Qwen 默认 `enable_thinking=true`、`stream=true`，思考预算默认 1024 tok
 
 转换在模型整理前保存含转写、候选帧和章节计划的 `.work/evidence.json`。每章实际使用的证据包及图片相对路径、SHA-256 组成结构版本 1 的 `CompositionInput`，在请求前写入 `.work/composition-inputs/`；通过校验并采用的 `Draft` 写入 `.work/composition-drafts/`。上一章的模型结果会影响下一章证据包，因此逐章按原顺序冻结。文字修订另保存调用时的结构化讲义和包含手改内容的 Markdown 基线，并在版本清单关联相应输入与草稿。原始模型最终正文仍保存在 `model-responses/`。
 
-`notes/composition.py` 负责从证据形成输入，以及将给定草稿确定性地应用到转换章节或修订目标；`providers` 保持外部模型适配与有界调用职责。开发工具 `tools/replay_conversion.py` 只读重建成功转换的 r001 或指定文字修订：转换逐章核对冻结输入，修订核对目标手改文本与图片，均核对采用的草稿、结构化讲义与生成的 Markdown 快照。精确换图不调用模型，由现有媒体与修订测试验证。离线重建不重发 API 请求，也不代表模型内容正确；服务端模型、思考过程、DeepSeek 完整历史及修复轮的再次生成不保证相同。
+`notes/composition.py` 负责从证据形成输入，以及将给定草稿确定性地应用到转换章节或修订目标；`notes/generation.py` 管理上下文与有界调用，`providers` 只做外部协议适配。开发工具 `tools/replay_conversion.py` 只读重建成功转换的 r001 或指定文字修订：转换逐章核对冻结输入，修订核对目标手改文本与图片，均核对采用的草稿、结构化讲义与生成的 Markdown 快照。精确换图不调用模型，由现有媒体与修订测试验证。离线重建不重发 API 请求，也不代表模型内容正确；服务端模型、思考过程、DeepSeek 完整历史及修复轮的再次生成不保证相同。
 
 ### 独立人工校订
 
@@ -172,7 +174,7 @@ output/sample/
 
 章节和块使用独立起止 HTML 注释锚点。正文校验与定位器共用 Markdown 解析规则，支持列表、引用中的代码围栏；模型围栏必须显式闭合。定位器忽略 fenced code 与缩进代码中的类似字符串，校验唯一性、闭合、嵌套和章节归属。修订默认显式基线 r001，可通过 `--base` 指定其他版本，绝不暗选最新版本。
 
-修订检查媒体/元数据指纹与轨道结构，展示标题的组合方式变化不使原证据失效。目标的当前手改文本作为修订输入；非目标 Markdown 按原字节保留，写入前重新检查基线哈希。章节修订保留标题，避免改写范围外的目录。保留的手改块标为 manual_unverified。用户新增的安全本地图片会复制；外部 URL、越界、缺失资源和不支持的结构均报错。
+`workflows/versions.py` 集中读取显式基线、核对来源、标记手改、分配修订编号并提交修订或复审版本；转换复用指纹函数，阅读导出复用基线读取。修订检查媒体/元数据指纹与轨道结构，展示标题的组合方式变化不使原证据失效。目标的当前手改文本作为修订输入；非目标 Markdown 按原字节保留，写入前重新检查基线哈希。章节修订保留标题，避免改写范围外的目录。保留的手改块标为 manual_unverified。用户新增的安全本地图片会复制；外部 URL、越界、缺失资源和不支持的结构均报错。
 
 待核对项的 `block_id` 可关联章节或块，导出时检查目标存在。文字修订重建目标范围的疑点，包括 `uncertain` 正文与模型返回的提示；范围外条目和没有目标关联的全局提示保留。整章修订同时替换该章及原有块的疑点，精确换图保留已有疑点并追加图文一致性提示。
 
@@ -218,7 +220,7 @@ HTML/PDF 将手写 HTML 静态化为文字、图片和锚点；代码围栏仍�
 
 ## 8. 验证与 P1 边界
 
-默认测试不联网、不下载权重、不需要 GPU 或私人视频。使用自造媒体与确定性模型替身验证前缀、时基/偏移、损坏文件、引用/缓存、路径、取消、版本独立性、手改和并发编辑。
+默认测试不联网、不下载权重、不需要 GPU 或私人视频。核心路径经实际 CLI 入口覆盖转换、复审、局部修订、换图、版本重放与阅读导出，模型替身位于外部 SDK 边界。前缀、时基/偏移、损坏文件、引用/缓存、路径、费用、取消和并发编辑保留有具体故障价值的定位用例；全流程规模与验证方法见[实现指南](implementation-guide.md#6-验证矩阵)。
 
 真实 ASR、DeepSeek、Qwen、PPT/编程/数学片段与约 100 分钟整课单独记录。结构正确、内容正确、时间对齐、手改保护、人工使用效率分开评估；未经人工实测的准确率或修订耗时不填写数值。
 

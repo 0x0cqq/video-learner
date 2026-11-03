@@ -2,22 +2,23 @@
 
 import json
 import time
-from types import SimpleNamespace
 
 from video_learner.common.config import Config
 from video_learner.common.core import TaskError
 from video_learner.common.storage import Events
 from video_learner.providers.base import (
-    DeepSeekProvider,
+    ModelRequest,
+    ModelResponse,
     credential,
+    provider_errors,
     validate_provider_config,
 )
 
 
-class QwenProvider(DeepSeekProvider):
+class QwenProvider:
     def __init__(self, config: Config, events: Events, client=None):
-        """建立固定 DashScope 端点的图文客户端，沿用共用请求预算并支持离线客户端注入。"""
-        self.config, self.events, self.calls = config, events, 0
+        """固定连接 DashScope 并关闭 SDK 重试；client 可注入离线替身。"""
+        self.config, self.events = config, events
         if client is None:
             from openai import OpenAI
 
@@ -30,103 +31,96 @@ class QwenProvider(DeepSeekProvider):
             )
         self.client = client
 
-    def _request(self, content: list[dict], repair: str | None):
-        """将共用图像证据转换成 Chat Completions 流，归一化为共用校验层的响应。
+    def generate(self, request: ModelRequest, *, call: int) -> ModelResponse:
+        """发送业务层选定的完整消息并读取 Chat Completions 流。
 
         思考增量只触发进度，不保存文本；拼接最终正文并处理仅含 usage 的尾块。
         缺少正常停止标记视为未完成，超时或异常关闭流，局部正文不会带入下一次请求。
         """
-        parts = []
-        for item in content:
-            if item["type"] == "input_text":
-                parts.append({"type": "text", "text": item["text"]})
-            else:
-                parts.append({"type": "image_url", "image_url": {"url": item["image_url"]}})
-        if repair:
-            parts.append({"type": "text", "text": repair})
-        options = {"enable_thinking": self.config.qwen_enable_thinking}
-        if self.config.qwen_enable_thinking:
-            options["thinking_budget"] = self.config.qwen_thinking_budget
-        started = time.monotonic()
-        schema = self._schema
-        stream = self.client.chat.completions.create(
-            model=self.config.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": self._system_prompt + "\nJSON schema:\n" + json.dumps(schema),
+        with provider_errors():
+            options = {"enable_thinking": self.config.qwen_enable_thinking}
+            if self.config.qwen_enable_thinking:
+                options["thinking_budget"] = self.config.qwen_thinking_budget
+            started = time.monotonic()
+            schema = request.schema
+            stream = self.client.chat.completions.create(
+                model=self.config.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": request.instructions + "\nJSON schema:\n" + json.dumps(schema),
+                    },
+                    *request.messages,
+                ],
+                stream=True,
+                stream_options={"include_usage": True},
+                extra_body=options,
+                max_completion_tokens=self.config.max_output_tokens,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": "chapter", "schema": schema, "strict": True},
                 },
-                {"role": "user", "content": parts},
-            ],
-            stream=True,
-            stream_options={"include_usage": True},
-            extra_body=options,
-            max_completion_tokens=self.config.max_output_tokens,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": "chapter", "schema": schema, "strict": True},
-            },
-        )
-        stream_open_seconds = time.monotonic() - started
-        answer, size, finish, usage = [], 0, None, None
-        first_chunk = first_reasoning = first_answer = None
-        chunks = reasoning_characters = 0
-        exhausted = False
-        try:
-            for chunk in stream:
-                elapsed = time.monotonic() - started
-                chunks += 1
-                if first_chunk is None:
-                    first_chunk = elapsed
-                if elapsed > self.config.request_timeout_seconds:
-                    raise TaskError("Qwen 流式响应超过时间上限")
-                if getattr(chunk, "usage", None) is not None:
-                    usage = chunk.usage
-                if not chunk.choices:
-                    # 服务可在正文结束后另发 usage 尾块，它没有可读取的 delta。
-                    continue
-                choice = chunk.choices[0]
-                delta = choice.delta
-                reasoning = getattr(delta, "reasoning_content", None)
-                answer_text = getattr(delta, "content", None)
-                if reasoning:
-                    reasoning_characters += len(reasoning)
-                    if first_reasoning is None:
-                        first_reasoning = elapsed
-                        self.events.emit("model_stream", "thinking", call=self.calls)
-                if answer_text:
-                    if first_answer is None:
-                        first_answer = elapsed
-                        self.events.emit("model_stream", "answering", call=self.calls)
-                    size += len(answer_text)
-                    if size > 100000:
-                        raise TaskError("Qwen 正文超过大小上限")
-                    answer.append(answer_text)
-                if choice.finish_reason is not None:
-                    finish = choice.finish_reason
-            exhausted = True
-        finally:
-            stream.close()
-            # 只记录客户端观察到的阶段延迟和字符数，不保存思考文本，也不推断服务端推理耗时。
-            self.events.emit(
-                "model_stream_timing",
-                "completed" if exhausted and finish == "stop" and answer else "incomplete",
-                call=self.calls,
-                seconds=time.monotonic() - started,
-                stream_open_seconds=stream_open_seconds,
-                first_chunk_seconds=first_chunk,
-                first_reasoning_seconds=first_reasoning,
-                first_answer_seconds=first_answer,
-                chunks=chunks,
-                answer_characters=size,
-                reasoning_characters=reasoning_characters,
             )
-        return SimpleNamespace(
-            status="completed" if finish == "stop" and answer else "incomplete",
-            output_text="".join(answer),
-            usage=SimpleNamespace(
+            stream_open_seconds = time.monotonic() - started
+            answer, size, finish, usage = [], 0, None, None
+            first_chunk = first_reasoning = first_answer = None
+            chunks = reasoning_characters = 0
+            exhausted = False
+            try:
+                for chunk in stream:
+                    elapsed = time.monotonic() - started
+                    chunks += 1
+                    if first_chunk is None:
+                        first_chunk = elapsed
+                    if elapsed > self.config.request_timeout_seconds:
+                        raise TaskError("Qwen 流式响应超过时间上限")
+                    if getattr(chunk, "usage", None) is not None:
+                        usage = chunk.usage
+                    if not chunk.choices:
+                        # 服务可在正文结束后另发 usage 尾块，它没有可读取的 delta。
+                        continue
+                    choice = chunk.choices[0]
+                    delta = choice.delta
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    answer_text = getattr(delta, "content", None)
+                    if reasoning:
+                        reasoning_characters += len(reasoning)
+                        if first_reasoning is None:
+                            first_reasoning = elapsed
+                            self.events.emit("model_stream", "thinking", call=call)
+                    if answer_text:
+                        if first_answer is None:
+                            first_answer = elapsed
+                            self.events.emit("model_stream", "answering", call=call)
+                        size += len(answer_text)
+                        if size > 100000:
+                            raise TaskError("Qwen 正文超过大小上限")
+                        answer.append(answer_text)
+                    if choice.finish_reason is not None:
+                        finish = choice.finish_reason
+                exhausted = True
+            finally:
+                stream.close()
+                # 只记录客户端观察到的阶段延迟和字符数，不保存思考文本，也不推断服务端推理耗时。
+                self.events.emit(
+                    "model_stream_timing",
+                    "completed" if exhausted and finish == "stop" and answer else "incomplete",
+                    call=call,
+                    seconds=time.monotonic() - started,
+                    stream_open_seconds=stream_open_seconds,
+                    first_chunk_seconds=first_chunk,
+                    first_reasoning_seconds=first_reasoning,
+                    first_answer_seconds=first_answer,
+                    chunks=chunks,
+                    answer_characters=size,
+                    reasoning_characters=reasoning_characters,
+                )
+            return ModelResponse(
+                text="".join(answer),
+                completed=finish == "stop" and bool(answer),
                 input_tokens=getattr(usage, "prompt_tokens", None),
                 output_tokens=getattr(usage, "completion_tokens", None),
-                input_tokens_details=getattr(usage, "prompt_tokens_details", None),
-            ),
-        )
+                cached_input_tokens=getattr(
+                    getattr(usage, "prompt_tokens_details", None), "cached_tokens", None
+                ),
+            )
