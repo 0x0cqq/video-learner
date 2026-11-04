@@ -22,7 +22,7 @@ from video_learner.common.usage import summarize_usage
 from video_learner.exports import export_book
 from video_learner.exports.pdf import font_path
 from video_learner.media.evidence import load_subtitles, sample_frames, save_transcript
-from video_learner.media.io import inspect_source, track_of
+from video_learner.media.io import track_of
 from video_learner.notes.composition import (
     apply_chapter_draft,
     composition_input,
@@ -32,8 +32,12 @@ from video_learner.notes.composition import (
 from video_learner.notes.generation import Generator, create_generator
 from video_learner.notes.prompts import PROMPT_VERSION
 from video_learner.providers.base import validate_provider_config
-from video_learner.workflows.ingestion import resolve_source
-from video_learner.workflows.transcription import transcribe, validate_asr_config
+from video_learner.workflows.ingestion import prepare_source
+from video_learner.workflows.transcription import (
+    transcribe,
+    validate_asr_config,
+    validate_asr_range,
+)
 from video_learner.workflows.versions import extraction_hash, fingerprint_source
 
 
@@ -53,18 +57,22 @@ def convert(
 ) -> Path:
     """统一三个输入入口，在独占锁内提取证据、组织章节并提交新输出目录。
 
-    URL 先下载到独立素材目录；输入与凭据预检通过后才创建讲义工作目录。
+    模型与 ASR 后端配置先预检；URL 下载到独立素材目录，再检查实际时间范围与调用预算。
+    素材预检通过后才创建讲义工作目录。
     仅全部章节完成才登记 r001。
     默认随后独立复审并返回 r002；复审失败保留 r001，费用计入同一次转换。
     force 在预检通过并持锁后删除原输出；后续转换失败不会恢复被删除的旧结果。
     失败保留诊断产物并抛异常，这些文件不代表可恢复任务或可修订的成功版本。
     """
     font_path(pdf_font)
-    source_path = resolve_source(
+    if generator is None:
+        validate_provider_config(config)
+    if subtitle is None:
+        validate_asr_config(config)
+    source_path, source = prepare_source(
         source_path, download_dir, output=output, force=force, progress=progress
     )
     target = output_path(source_path, output, force=force)
-    source = inspect_source(source_path)
     if source.diagnostics:
         raise InputError("素材检查发现问题：" + "；".join(source.diagnostics))
     track_of(source, "audio")
@@ -79,10 +87,8 @@ def convert(
             end_us,
             source.duration_us,
         )
-    if generator is None:
-        validate_provider_config(config)
     if subtitle_segments is None:
-        validate_asr_config(config, start_us, end_us)
+        validate_asr_range(config, start_us, end_us)
     if force:
         for dependency in (
             subtitle,

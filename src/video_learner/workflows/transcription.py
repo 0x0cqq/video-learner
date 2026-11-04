@@ -15,12 +15,19 @@ from video_learner.media.audio import encode_wav, pause_cut
 from video_learner.providers.asr import QwenASR, Recognizer, validate_qwen_config
 
 
-def validate_asr_config(config: Config, start_us: int, end_us: int) -> None:
-    """按显式后端预检；本地识别无需云端凭据，也不会在预检时下载权重。"""
+def validate_asr_range(config: Config, start_us: int, end_us: int) -> None:
+    """在已知素材范围后核对云端切片预算，不重复读取凭据或探测本地后端。"""
     if config.asr_backend == "qwen":
         window = config.asr_window_seconds * US
         if (end_us - start_us + window - 1) // window > config.asr_max_calls:
             raise InputError("Qwen ASR 所需切片数超过 asr_max_calls，请调整范围或配置")
+
+
+def validate_asr_config(config: Config, start_us: int = 0, end_us: int | None = None) -> None:
+    """预检后端和凭据，不下载权重；已知范围时一并核对云端切片预算。"""
+    if end_us is not None:
+        validate_asr_range(config, start_us, end_us)
+    if config.asr_backend == "qwen":
         validate_qwen_config(config)
     else:
         from video_learner.providers.local_asr import validate_local_config

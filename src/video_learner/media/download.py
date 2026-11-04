@@ -1,39 +1,15 @@
-"""用 yt-dlp 下载单个在线视频，发布可供本地媒体流程只读使用的素材目录。"""
+"""yt-dlp 单视频适配：下载到调用方目录，返回最小元数据和脱敏进度。"""
 
 import re
-import shutil
-import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
-from video_learner.common.core import InputError, TaskError, contained
+from video_learner.common.core import InputError, TaskError
 from video_learner.common.schemas import DownloadMetadata
-from video_learner.common.storage import Events, write_json
-from video_learner.media.io import inspect_source, track_of
-
-
-def source_url(value: str | Path) -> str | None:
-    """识别 HTTP(S) URL 或裸 BVID；本地路径不改写，保留 URL 的分 P 和查询参数。"""
-    if isinstance(value, Path):
-        return None
-    if re.fullmatch(r"BV[0-9A-Za-z]{10}", value):
-        return f"https://www.bilibili.com/video/{value}"
-    if "://" not in value:
-        return None
-    try:
-        parsed = urlsplit(value)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            raise ValueError
-        if parsed.username or parsed.password:
-            raise ValueError
-        _ = parsed.port
-    except ValueError as exc:
-        raise InputError("在线视频须为无内嵌账号密码的 HTTP(S) URL，或完整 BVID") from exc
-    return value
+from video_learner.common.storage import Events
 
 
 def select_formats(context: dict) -> Iterator[dict]:
@@ -76,19 +52,11 @@ class DownloadLogger:
         pass
 
 
-def download_source(
-    url: str, directory: Path, progress: Callable[[dict], None] | None = None
-) -> Path:
-    """下载并探测唯一音视频后原子发布素材；失败或中断清理本次临时目录。
+def download_video(url: str, directory: Path, events: Events) -> DownloadMetadata:
+    """下载单个非直播视频；目录生命周期、媒体检查和发布由应用层负责。
 
-    每次请求独立下载，不复用未完成数据。只持久化标题和 BVID，不保存 yt-dlp 原始信息。
+    不读取命令行配置或浏览器登录信息，不保存原始站点信息；失败不透传敏感错误正文。
     """
-    root = directory.resolve()
-    identity = uuid.uuid4().hex
-    staging = contained(root, f".{identity}.partial")
-    target = contained(root, identity)
-    staging.mkdir(parents=True, exist_ok=False)
-    events = Events(staging, progress)
 
     def report(record: dict) -> None:
         """只提取字节计数，忽略 hook 中的 URL、文件名和完整站点信息。"""
@@ -103,7 +71,7 @@ def download_source(
 
     options = {
         "format": select_formats,
-        "outtmpl": str(staging / "%(format_id)s.%(ext)s"),
+        "outtmpl": str(directory / "%(format_id)s.%(ext)s"),
         "noplaylist": True,
         "extract_flat": "in_playlist",
         "lazy_playlist": True,
@@ -119,40 +87,24 @@ def download_source(
         "abort_on_unavailable_fragments": True,
     }
     try:
-        with events.stage("download"):
-            with YoutubeDL(options) as downloader:
-                info = downloader.extract_info(url, download=False)
-                if not info or info.get("_type", "video") != "video":
-                    raise InputError("仅支持单视频 URL；请为合集指定具体视频或用 ?p= 选择分 P")
-                if info.get("is_live") or info.get("live_status") in (
-                    "is_live",
-                    "is_upcoming",
-                    "post_live",
-                ):
-                    raise InputError("不支持直播或尚未完成处理的视频，请提供已发布的单视频")
-                downloader.process_ie_result(info, download=True)
-            identity_match = re.fullmatch(r"(BV[0-9A-Za-z]{10})(?:_p\d+)?", str(info.get("id", "")))
-            metadata = DownloadMetadata(
-                title=info.get("title") or "在线视频",
-                bvid=identity_match[1] if identity_match else None,
-            )
-            write_json(staging / "download.json", metadata.model_dump())
-            source = inspect_source(staging, decode=True)
-            track_of(source, "audio")
-            if source.diagnostics:
-                raise TaskError("下载媒体未通过音视频探测或抽查解码")
-            staging.rename(target)
-            events.path = target / ".work/logs/events.jsonl"
-            events.emit("download_source", "ready", path=str(target))
-    except BaseException as exc:
-        # 两个路径均由本次 UUID 在指定根目录内创建，不能使用站点返回的路径清理文件。
-        for folder in (staging, target):
-            if folder.exists():
-                shutil.rmtree(contained(root, folder.name))
-        if isinstance(exc, DownloadError):
-            raise TaskError(
-                "yt-dlp 下载失败；请检查网络、站点支持、登录或地区限制，必要时更新 yt-dlp；"
-                "也可使用本地视频或 Bilibili 缓存"
-            ) from None
-        raise
-    return target
+        with YoutubeDL(options) as downloader:
+            info = downloader.extract_info(url, download=False)
+            if not info or info.get("_type", "video") != "video":
+                raise InputError("仅支持单视频 URL；请为合集指定具体视频或用 ?p= 选择分 P")
+            if info.get("is_live") or info.get("live_status") in (
+                "is_live",
+                "is_upcoming",
+                "post_live",
+            ):
+                raise InputError("不支持直播或尚未完成处理的视频，请提供已发布的单视频")
+            downloader.process_ie_result(info, download=True)
+    except DownloadError:
+        raise TaskError(
+            "yt-dlp 下载失败；请检查网络、站点支持、登录或地区限制，必要时更新 yt-dlp；"
+            "也可使用本地视频或 Bilibili 缓存"
+        ) from None
+    identity_match = re.fullmatch(r"(BV[0-9A-Za-z]{10})(?:_p\d+)?", str(info.get("id", "")))
+    return DownloadMetadata(
+        title=info.get("title") or "在线视频",
+        bvid=identity_match[1] if identity_match else None,
+    )

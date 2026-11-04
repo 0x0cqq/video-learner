@@ -201,9 +201,11 @@ def verify_source(root: Path, manifest: dict, book: Notebook) -> VerifiedSource:
     subtitle = Path(local["subtitle"]) if local.get("subtitle") else None
     source = inspect_source(path)
     fingerprints = fingerprint_source(path, source, subtitle)
+    # 标题与当时执行过的解码检查属于展示/探测结果，不改变实际媒体身份。
+    identity_fields = {"title", "sampled_decode", "full_verified"}
     if fingerprints != local["files"] or source.model_dump(
-        exclude={"title"}
-    ) != book.source.model_dump(exclude={"title"}):
+        exclude=identity_fields
+    ) != book.source.model_dump(exclude=identity_fields):
         raise InputError("源素材与基线不一致，请重新转换到独立目录")
     return VerifiedSource(path, source, subtitle, fingerprints)
 

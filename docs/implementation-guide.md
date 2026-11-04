@@ -40,7 +40,7 @@ src/video_learner/
     prices.toml           # 估算单价快照，支持用户配置覆盖
     storage.py            # 清单、指纹、原子提交、日志与 OS 文件锁
   workflows/
-    ingestion.py          # URL/BVID、本地视频、缓存三入口统一与下载/输出边界
+    ingestion.py          # 三入口准备、目录边界、统一探测、素材发布与失败清理
     conversion.py         # 转换用例编排
     transcription.py      # 共用切片、ASR 并发、取消收尾与证据保存
     versions.py           # 指纹、显式基线、手改标记与修订/复审版本提交
@@ -49,7 +49,7 @@ src/video_learner/
     replay.py             # 冻结证据和草稿的只读离线重建
     exporting.py          # 现有版本的只读导出与原子发布
   media/
-    download.py           # yt-dlp 单视频下载、脱敏事件与验证后原子发布
+    download.py           # yt-dlp 单视频适配、最小元数据与脱敏字节进度
     io.py                 # 普通视频/已知缓存、偏移视图、轨道与抽帧
     evidence.py           # 音频窗口、字幕、采样与原课时间映射
     audio.py              # 有界 WAV 编码和低音量停顿切点
@@ -95,7 +95,7 @@ tools/
 
 ### 4.1 输入与时间
 
-- 每次输入一个在线视频 URL/BVID、普通本地视频或课时缓存目录，不能递归调度多个课时。yt-dlp 随默认依赖安装，不需要启用开关；在线素材生命周期和分 P 行为见[导入契约](technical-design.md#2-导入与规范时间线)。
+- 每次输入一个在线视频 URL/BVID、普通本地视频或课时缓存目录，不能递归调度多个课时。yt-dlp 随默认依赖安装，不需要启用开关；素材生命周期由输入准备工作流统一管理，检查与转换复用探测结果，模型和 ASR 配置先于下载预检。完整边界和分 P 行为见[导入契约](technical-design.md#2-导入与规范时间线)。
 - `--start`/`--end` 使用原视频时间，范围按 `[start, end)` 解释；显示到秒，内部保留微秒。
 - 帧选择先 seek 到不晚于目标的关键帧，再解码至不早于目标的第一帧。自动采样的尾部取帧与精确换图边界见[技术设计](technical-design.md#2-导入与规范时间线)，均保留实际帧时间。
 - 使用含已知操作事件的片段核对时间对齐；稀疏抽帧只能作为抽查，不能视为全区间人工标注。

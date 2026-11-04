@@ -1,6 +1,7 @@
 """以回环 HTTP 服务验证实际 yt-dlp 下载，站点解析替身不访问公网。"""
 
 import json
+import shutil
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,9 +15,9 @@ from yt_dlp.extractor.common import InfoExtractor
 from yt_dlp.utils import DownloadError
 
 from video_learner.common.core import InputError
-from video_learner.common.schemas import Notebook
+from video_learner.common.schemas import DownloadMetadata, Notebook
 from video_learner.common.storage import read_json
-from video_learner.workflows.ingestion import resolve_source
+from video_learner.workflows.ingestion import prepare_source
 
 
 @pytest.fixture
@@ -140,7 +141,9 @@ def test_url_cli_download_convert_revise_export(media_server, video, tmp_path, m
     invoke("revise", root, base="r001", block="fig-001-002", frame="2", code=2)
 
 
-@pytest.mark.parametrize("failure", ["playlist", "live", "download", "cancel", "invalid_media"])
+@pytest.mark.parametrize(
+    "failure", ["playlist", "live", "download", "cancel", "invalid_media", "events"]
+)
 def test_download_failure_never_publishes(tmp_path, monkeypatch, failure):
     """集合/直播提前拒绝，下载错误、中断及坏媒体清理临时数据，不暴露签名 URL。"""
 
@@ -170,6 +173,13 @@ def test_download_failure_never_publishes(tmp_path, monkeypatch, failure):
                 raise DownloadError("https://example.test/video?token=private-signature")
 
     monkeypatch.setattr("video_learner.media.download.YoutubeDL", FailedDownload)
+    if failure == "events":
+
+        def failed_events(*args):
+            """模拟磁盘或权限问题发生在日志初始化，早于正常下载 try 阶段。"""
+            raise OSError("无法初始化日志")
+
+        monkeypatch.setattr("video_learner.workflows.ingestion.Events", failed_events)
     target = tmp_path / "downloads"
     result = invoke(
         "inspect",
@@ -185,13 +195,17 @@ def test_download_failure_never_publishes(tmp_path, monkeypatch, failure):
     assert "private-signature" not in result.output
 
 
-def test_download_output_protection_and_bvid(tmp_path, monkeypatch):
+def test_download_output_protection_and_bvid(video, tmp_path, monkeypatch):
     """冲突目录在联网前拒绝，force 保留旧文件；裸 BVID 与路径共用明确的输入分派。"""
     calls = []
-    monkeypatch.setattr(
-        "video_learner.workflows.ingestion.download_source",
-        lambda *args: calls.append(args) or tmp_path,
-    )
+
+    def downloaded(url, directory, events):
+        """只替换远端获取，后续本地媒体验证和素材发布仍按真实工作流执行。"""
+        calls.append(url)
+        shutil.copyfile(video, directory / "media.mp4")
+        return DownloadMetadata(title="自造课程")
+
+    monkeypatch.setattr("video_learner.media.download.download_video", downloaded)
     downloads = tmp_path / "downloads"
     output = tmp_path / "output"
     output.mkdir()
@@ -204,11 +218,30 @@ def test_download_output_protection_and_bvid(tmp_path, monkeypatch):
         (Path.cwd(), downloads, True),
     ):
         with pytest.raises(InputError):
-            resolve_source("https://example.test/video", directory, output=target, force=force)
+            prepare_source("https://example.test/video", directory, output=target, force=force)
     assert not calls and marker.read_text(encoding="utf-8") == "已有手改"
-    assert resolve_source("BV1bK411W797", downloads) == tmp_path
-    assert calls[0][0] == "https://www.bilibili.com/video/BV1bK411W797"
-    assert resolve_source(tmp_path / "local.mp4") == tmp_path / "local.mp4"
+    path, source = prepare_source("BV1bK411W797", downloads)
+    assert path.parent == downloads and source.sampled_decode
+    assert calls == ["https://www.bilibili.com/video/BV1bK411W797"]
+    assert prepare_source(video)[0] == video
     for value in ("file:///secret", "https://user:password@example.test/video", "https://"):
         with pytest.raises(InputError):
-            resolve_source(value, downloads)
+            prepare_source(value, downloads)
+
+
+@pytest.mark.parametrize("missing", ["provider", "asr"])
+def test_conversion_credentials_checked_before_download(tmp_path, monkeypatch, missing):
+    """缺图文或 ASR 凭据时应在下载副作用之前报错，避免无效请求先拉取整课。"""
+    calls = []
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
+    monkeypatch.delenv("DEEPSEEK_API_KEY" if missing == "provider" else "DASHSCOPE_API_KEY")
+    monkeypatch.setattr(
+        "video_learner.media.download.YoutubeDL", lambda options: calls.append(options)
+    )
+    downloads, output = tmp_path / "downloads", tmp_path / "output"
+    result = invoke(
+        "convert", "https://example.test/video", output=output, download_dir=downloads, code=2
+    )
+    assert "凭据" in result.output and not calls
+    assert not downloads.exists() and not output.exists()

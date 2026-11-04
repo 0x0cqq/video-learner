@@ -10,7 +10,6 @@ from rich.console import Console
 from rich.table import Table
 
 from video_learner.common.core import InputError, TaskError, timestamp
-from video_learner.media.io import inspect_source
 from video_learner.terminal import TerminalProgress
 
 app = typer.Typer(
@@ -40,12 +39,13 @@ def inspect_command(
     ] = None,
 ) -> None:
     """检查在线视频、本地视频或单课时缓存；URL 会先下载，检查不调用 AI。"""
-    from video_learner.workflows.ingestion import resolve_source
+    from video_learner.workflows.ingestion import prepare_source
 
     # 只转换显示格式：JSON 走 stdout，人工提示走 stderr；有诊断仍输出结果并返回非零码。
     with TerminalProgress(console) as progress:
-        path = resolve_source(source, download_dir, progress=progress)
-        result = inspect_source(path, decode=decode, full=full)
+        _, result = prepare_source(
+            source, download_dir, progress=progress, decode=decode, full=full
+        )
     if as_json:
         typer.echo(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
     else:

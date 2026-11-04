@@ -31,7 +31,7 @@
 
 | 顺序 | 源码与数据变化 | 保存的结果 |
 | --- | --- | --- |
-| 1. 检查与准备 | `workflows/ingestion.py:resolve_source()` 将在线或本地输入统一为素材路径；`media/io.py:inspect_source()` 产生 `Source`；`versions.py:fingerprint_source()` 核对实际媒体、元数据和显式字幕 | URL 的下载素材另存于下载目录，见[导入契约](#2-导入与规范时间线)；`.work/source-local.json` 保存本机来源与文件哈希；`.work/manifest.json` 保存运行状态、范围和配置；`.work/logs/events.jsonl` 追加阶段事件 |
+| 1. 检查与准备 | `workflows/ingestion.py:prepare_source()` 统一返回素材路径与 `Source`；内部通过 `media/io.py:inspect_source()` 完成探测；`versions.py:fingerprint_source()` 核对实际媒体、元数据和显式字幕 | URL 的下载素材另存于下载目录，见[导入契约](#2-导入与规范时间线)；`.work/source-local.json` 保存本机来源与文件哈希；`.work/manifest.json` 保存运行状态、范围和配置；`.work/logs/events.jsonl` 追加阶段事件 |
 | 2. 转写 | `workflows/transcription.py:transcribe()` 调用 `media/evidence.py:audio_window()`，按真实音频窗口取得 `TranscriptSegment`；显式 SRT/VTT 则由 `load_subtitles()` 提供片段 | `transcript.jsonl` 保存逐条转写证据；ASR 路径另存 `.work/audio/audio-*.wav`、同名 `.json` 时间映射及 `.work/asr-responses/audio-*.json` 识别文本；字幕路径另存 `.work/subtitle-check.json` |
 | 3. 候选画面 | `media/evidence.py:sample_frames()` 扫描变化，`register_frame()` 登记实际 PTS、时间、图片路径和哈希，形成 `FrameEvidence` | `.work/frame-scan.json`、`.work/frames.json` 与 `.work/frames/frame-*.png`；这些是候选完整帧 |
 | 4. 章节与模型前证据 | `notes/composition.py:plan_chapters()` 划分连续范围；`composition_input()` 从当前 `Notebook` 构造逐章证据包 | `.work/evidence.json` 保存整理前的转写、候选帧和章节计划；每章调用前写入 `.work/composition-inputs/ch-*.json`，包含实际证据包与图片身份 |
@@ -43,7 +43,9 @@
 
 ## 2. 导入与规范时间线
 
-三个并列入口为 yt-dlp 在线单视频 URL/BVID、已验证 Bilibili 单课时本地缓存和普通本地视频。`workflows/ingestion.py:resolve_source()` 将输入统一为本地绝对路径，CLI 保留字符串参数以免把 URL 转成 Windows 路径。文件名只提供线索，编码以实际轨道探测为准。读取课程/课时标题和 BVID，有不同的 groupTitle 时组合为“课程 · 课时”，缺失标题回退到文件名。发现独立 SRT/VTT，弹幕不当作字幕。
+三个并列入口为 yt-dlp 在线单视频 URL/BVID、已验证 Bilibili 单课时本地缓存和普通本地视频。`workflows/ingestion.py:prepare_source()` 统一返回本地绝对路径与探测结果，检查和转换直接消费同一结果，CLI 保留字符串参数以免把 URL 转成 Windows 路径。文件名只提供线索，编码以实际轨道探测为准。读取课程/课时标题和 BVID，有不同的 groupTitle 时组合为“课程 · 课时”，缺失标题回退到文件名。发现独立 SRT/VTT，弹幕不当作字幕。
+
+输入准备工作流负责 URL/BVID 分派、下载目录生命周期、脱敏事件、媒体检查、元数据保存、原子发布和失败清理，日志初始化失败也受清理保护。本地输入不加载下载适配器。`media/download.py:download_video()` 仅负责 yt-dlp 调用、单视频格式选择和最小元数据返回，不依赖媒体探测或版本模块。转换先检查模型和 ASR 后端配置，再准备素材；时间范围和切片预算在已知时长后验证。`sampled_decode`、`full_verified` 表示执行过的检查，来源核验以文件指纹及媒体结构为准，不把这些探测状态作为素材身份。
 
 在线输入由 `media/download.py` 通过 [yt-dlp Python API](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp) 获取：仅接受无内嵌账号密码的 HTTP(S) URL 或完整 BVID，保留查询参数；`noplaylist` 使视频链接不扩展合集，Bilibili `?p=` 选指定 P，裸 BV/未选 P 取第一 P。预提取返回播放列表或直播时拒绝下载。默认分别下载最佳独立视频和音轨，没有分离格式时取合流素材，不合并、不转码；特殊站点协议仍可能需要 yt-dlp 的额外运行依赖。
 
