@@ -4,12 +4,16 @@ from html import escape
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 from markdown_it.tree import SyntaxTreeNode
 from PIL import Image as PILImage
 
 from video_learner.common.core import InputError
 from video_learner.exports.document import ExportDocument, safe_link
+
+if TYPE_CHECKING:
+    from reportlab.pdfbase.ttfonts import TTFont
 
 
 def font_path(explicit: Path | None = None) -> Path:
@@ -30,6 +34,24 @@ def font_path(explicit: Path | None = None) -> Path:
     raise InputError("PDF 需要中文 TrueType 字体，请用 --pdf-font 指定 TTF/TTC 文件")
 
 
+def font_faces(explicit: Path | None = None) -> tuple["TTFont", "TTFont | None"]:
+    """实际解析正文字体和可选粗体，供工作流提前预检与 PDF 排版共用。"""
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    path = font_path(explicit)
+    try:
+        face = TTFont("Lecture", str(path), subfontIndex=0)
+        bold_path = path.with_name("msyhbd.ttc")
+        bold = (
+            TTFont("LectureBold", str(bold_path))
+            if path.name == "msyh.ttc" and bold_path.is_file()
+            else None
+        )
+        return face, bold
+    except Exception as exc:
+        raise InputError("PDF 字体无法加载，请指定可嵌入的 TrueType TTF/TTC 字体") from exc
+
+
 def write(document: ExportDocument, destination: Path, *, font: Path | None = None) -> list[str]:
     """在临时目录渲染公式，完成或失败均清理中间图片。"""
     with TemporaryDirectory(prefix=".pdf-", dir=destination) as temporary:
@@ -47,7 +69,6 @@ def render_pdf(
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle
         from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
         from reportlab.platypus import (
             Flowable,
             HRFlowable,
@@ -62,19 +83,14 @@ def render_pdf(
     except ImportError as exc:
         raise InputError("PDF 依赖未安装，请运行 uv sync --locked") from exc
 
-    path = font_path(font)
-    try:
-        face = TTFont("Lecture", str(path), subfontIndex=0)
-        pdfmetrics.registerFont(face)
-        bold = "Lecture"
-        if path.name == "msyh.ttc" and path.with_name("msyhbd.ttc").is_file():
-            pdfmetrics.registerFont(TTFont("LectureBold", str(path.with_name("msyhbd.ttc"))))
-            bold = "LectureBold"
-        pdfmetrics.registerFontFamily(
-            "Lecture", normal="Lecture", bold=bold, italic="Lecture", boldItalic=bold
-        )
-    except Exception as exc:
-        raise InputError("PDF 字体无法加载，请指定可嵌入的 TrueType TTF/TTC 字体") from exc
+    face, bold_face = font_faces(font)
+    pdfmetrics.registerFont(face)
+    if bold_face is not None:
+        pdfmetrics.registerFont(bold_face)
+    bold = "LectureBold" if bold_face is not None else "Lecture"
+    pdfmetrics.registerFontFamily(
+        "Lecture", normal="Lecture", bold=bold, italic="Lecture", boldItalic=bold
+    )
     width = A4[0] - 96
     body = ParagraphStyle(
         "body",

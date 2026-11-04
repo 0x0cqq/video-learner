@@ -23,7 +23,7 @@ from video_learner.notes.composition import (
     validate_draft,
 )
 from video_learner.notes.quality import validate_editorial_structure
-from video_learner.notes.rendering import expected_spans, render_block
+from video_learner.notes.rendering import chapter_texts, expected_spans, render_block
 
 type ReviewFunction = Callable[[dict, list[tuple[str, Path]]], ReviewResult]
 
@@ -36,6 +36,8 @@ def review_input(
     current: bytes,
     revision_id: str,
     step: ReviewStep | None = None,
+    *,
+    packet_version: int = 3,
 ) -> tuple[CompositionInput, list[tuple[str, Path]]]:
     """结合实际 Markdown、前后章节与原始证据构造独立复审，不改写手改基线。
 
@@ -49,6 +51,8 @@ def review_input(
         config,
         root,
         current_markdown=current[span.start : span.end].decode("utf-8"),
+        packet_version=packet_version,
+        current_document=current,
     )
     required = {identity for block in chapter.blocks for identity in block.evidence_ids}
     required_frames = [frame for frame in book.frames if frame.id in required]
@@ -71,6 +75,7 @@ def review_input(
         }
         for frame in frames
     ]
+    current_sections = chapter_texts(current, book) if packet_version >= 3 else {}
     packet.update(
         operation="review",
         chapter=chapter.model_dump(),
@@ -82,7 +87,12 @@ def review_input(
         ],
         next_chapter_not_citable=next(
             (
-                {"title": item.title, "beginning": "\n".join(b.body for b in item.blocks)[:3000]}
+                {
+                    **({"title": item.title} if not current_sections else {}),
+                    "beginning": current_sections.get(
+                        item.id, "\n".join(b.body for b in item.blocks)
+                    )[:3000],
+                }
                 for item in book.chapters
                 if item.start_us >= chapter.end_us and item.status == "completed"
             ),

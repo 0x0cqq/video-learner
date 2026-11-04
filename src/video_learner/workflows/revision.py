@@ -13,8 +13,7 @@ from video_learner.common.storage import (
     directory_lock,
     write_json,
 )
-from video_learner.exports import export_book
-from video_learner.exports.pdf import font_path
+from video_learner.exports import DEFAULT_FORMATS, export_book, preflight
 from video_learner.media.evidence import register_frame
 from video_learner.notes.composition import (
     apply_revision_draft,
@@ -69,7 +68,7 @@ def revise(
         raise InputError("精确换图只接受 --block，不能同时指定文字修订要求")
     if not image_operation and not (instruction and instruction.strip()):
         raise InputError("文字修订必须提供 --instruction")
-    font_path(pdf_font)
+    preflight(DEFAULT_FORMATS, pdf_font)
     root = workdir.resolve()
     if not root.is_dir():
         raise InputError("工作目录不存在")
@@ -169,6 +168,7 @@ def revise(
                         root,
                         current_markdown=current[span.start : span.end].decode("utf-8"),
                         target_ids=[target_id],
+                        current_document=current,
                     )
                     if target_block is not None:
                         packet["target_block_kind"] = target_block.kind

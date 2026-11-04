@@ -5,11 +5,23 @@ from typing import Literal
 
 from video_learner.common.core import InputError, contained
 from video_learner.common.schemas import Notebook
-from video_learner.common.storage import write_json
+from video_learner.common.storage import digest, write_json
 from video_learner.exports.document import ExportDocument, prepare_document
 
 type ExportFormat = Literal["markdown", "html", "pdf"]
 DEFAULT_FORMATS: tuple[ExportFormat, ...] = ("markdown", "html", "pdf")
+
+
+def preflight(
+    formats: list[ExportFormat] | tuple[ExportFormat, ...], pdf_font: Path | None
+) -> None:
+    """在获取素材或调用模型前核对格式及字体可加载性，不生成任何导出文件。"""
+    if not formats or any(value not in DEFAULT_FORMATS for value in formats):
+        raise InputError("导出格式须为 markdown、html 或 pdf")
+    if "pdf" in formats:
+        from video_learner.exports.pdf import font_faces
+
+        font_faces(pdf_font)
 
 
 def write_document(
@@ -29,6 +41,8 @@ def write_document(
     for name in dict.fromkeys(formats):
         options = {"font": pdf_font} if name == "pdf" else {}
         warnings.extend(adapters[name](document, destination, **options))
+    if any(digest(path) != document.image_hashes[name] for name, path in document.images.items()):
+        raise InputError("导出期间图片发生变化，请重新导出")
     write_json(contained(destination, "notes.json"), document.book.model_dump())
     write_json(contained(destination, "source.json"), document.book.source.model_dump())
     return list(dict.fromkeys(warnings))

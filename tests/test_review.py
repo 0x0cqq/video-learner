@@ -6,8 +6,8 @@ from model_fakes import DeterministicGenerator, draft_block
 from video_learner.common.config import Config, ReviewStep, load_config
 from video_learner.common.core import InputError, TaskError
 from video_learner.common.schemas import Draft, DraftBlock, Notebook, ReviewFinding
-from video_learner.common.storage import read_json
-from video_learner.notes.composition import validate_draft
+from video_learner.common.storage import read_json, write_json
+from video_learner.notes.composition import evidence_packet, validate_draft
 from video_learner.notes.rendering import expected_spans, image_dependencies, render_notes
 from video_learner.notes.reviewing import apply_review_pass, review_input, reviewed_chapter
 from video_learner.workflows.replay import replay_conversion, replay_revision
@@ -76,6 +76,13 @@ def test_review_preserves_baseline_and_non_target_manual_bytes(converted):
     assert replay_revision(root, "r002") == updated
     manifest = read_json(root / ".work/manifest.json")
     assert manifest["versions"]["r002"]["base"] == "r001"
+    # 单章旧包与新包只有版本标记不同，模拟既有 v2 冻结记录并走完整重放入口。
+    record = root / ".work/reviews" / manifest["versions"]["r002"]["review_record"]
+    for input_path in record.glob("*/*.input.json"):
+        frozen = read_json(input_path)
+        frozen["packet"]["packet_version"] = 2
+        write_json(input_path, frozen)
+    assert replay_revision(root, "r002") == updated
 
 
 def test_concurrent_edit_blocks_review_commit(converted):
@@ -143,6 +150,11 @@ def test_body_ids_and_orphan_headings_are_validated_without_word_filter(converte
         validate_draft(draft, packet)
     draft.blocks[0].body = "```text\n" + packet["frames"][0]["id"] + "\n```"
     validate_draft(draft, packet)
+    draft.blocks[0].body = '```python\nstart = "12:34:56"\n```\n\n时间常量 `"12:34:56"`。'
+    validate_draft(draft, packet)
+    draft.blocks[0].body = "来源时间 12:34:56。"
+    with pytest.raises(TaskError, match="时间戳"):
+        validate_draft(draft, packet)
     draft.blocks[0].body = "### 完整画面"
     validate_draft(draft, packet)
     draft.blocks = draft.blocks[:1]
@@ -167,6 +179,42 @@ def test_review_preserves_manual_text_and_visual_only_chapter(converted):
     assert len(reviewed_chapter(result, packet).blocks) == 1
 
 
+def test_revision_and_review_context_reads_current_neighbors(converted):
+    """邻章手改进入新证据包；旧冻结包仍按原索引重建，不改变历史重放契约。"""
+    root, _ = converted
+    book, _, _, _ = prepared(root)
+    original = book.chapters[0]
+    book.chapters = []
+    for index in range(3):
+        chapter = original.model_copy(deep=True)
+        chapter.id = f"ch-{index + 1:03d}"
+        chapter.title = f"原章节标题 {index + 1}"
+        chapter.start_us, chapter.end_us = index * 1_000_000, (index + 1) * 1_000_000
+        for number, block in enumerate(chapter.blocks, 1):
+            block.id, block.chapter_id = f"blk-{index + 1:03d}-{number:03d}", chapter.id
+            block.body = f"原章节正文 {index + 1}"
+        book.chapters.append(chapter)
+    current = (
+        render_notes(book)
+        .replace("原章节正文".encode(), "用户手改正文".encode())
+        .replace("原章节标题".encode(), "用户手改标题".encode())
+    )
+    target = book.chapters[1]
+    frozen, _ = review_input(book, target, Config(), root, current, "r002")
+    assert "用户手改正文 1" in frozen.packet["previous_chapter_not_citable"]["ending"]
+    assert "用户手改正文 3" in frozen.packet["next_chapter_not_citable"]["beginning"]
+    assert "原章节标题" not in json.dumps(
+        frozen.packet["previous_chapter_not_citable"], ensure_ascii=False
+    )
+    assert "用户手改标题 3" in frozen.packet["next_chapter_not_citable"]["beginning"]
+    revised, _ = evidence_packet(
+        book, target, Config(), root, current_markdown="目标当前文本", current_document=current
+    )
+    assert "用户手改正文 1" in revised["previous_chapter_not_citable"]["ending"]
+    legacy, _ = review_input(book, target, Config(), root, current, "r002", packet_version=2)
+    assert "原章节正文 1" in legacy.packet["previous_chapter_not_citable"]["ending"]
+
+
 def test_function_pipeline_uses_updated_state_and_keeps_unresolved_issues(converted, tmp_path):
     """自定义函数按配置顺序串联，两次文字插入不撞 ID；报告轮保留图片和既有疑点。"""
     root, _ = converted
@@ -174,7 +222,7 @@ def test_function_pipeline_uses_updated_state_and_keeps_unresolved_issues(conver
     config_path.write_text(
         '[[review_steps]]\nname="visual"\nkind="visual"\n'
         '[[review_steps]]\nname="content"\nkind="content"\ninstruction="保留步骤"\n'
-        '[[review_steps]]\nname="wording"\nkind="content"\n'
+        '[[review_steps]]\nname="wording_check"\nkind="content"\n'
         '[[review_steps]]\nname="check"\nkind="content"\nmode="report"\n',
         encoding="utf-8",
     )
@@ -192,14 +240,14 @@ def test_function_pipeline_uses_updated_state_and_keeps_unresolved_issues(conver
             result.frames[-1].decision = "use"
             action, replacements = "report", []
         elif name == "check":
-            assert "补充步骤 wording" in packet["current_markdown"]
+            assert "补充步骤 wording_check" in packet["current_markdown"]
             assert [v["reason"] for v in packet["current_review"]] == ["需要核对原课条件。"]
             return result
         else:
             figures = [b for b in packet["chapter"]["blocks"] if b["kind"] == "figure"]
             assert len(figures) == 1 and figures[0]["frame_id"] == packet["frames"][-1]["id"]
             assert figures[0]["id"] in packet["current_markdown"]
-            if name == "wording":
+            if name == "wording_check":
                 assert "补充步骤 content" in packet["current_markdown"]
             action = "insert_after"
             replacements = [draft_block(f"补充步骤 {name}", block["evidence_ids"][0])]
@@ -219,9 +267,9 @@ def test_function_pipeline_uses_updated_state_and_keeps_unresolved_issues(conver
     destination = review(
         root,
         config_path=config_path,
-        reviewers={name: step for name in ("visual", "content", "wording", "check")},
+        reviewers={name: step for name in ("visual", "content", "wording_check", "check")},
     )
-    assert calls == ["visual", "content", "wording", "check"]
+    assert calls == ["visual", "content", "wording_check", "check"]
     book = replay_revision(root, "r002")
     assert [item.reason for item in book.review if item.block_id] == ["需要核对原课条件。"]
     assert [item for item in book.review if item.block_id is None] == [

@@ -121,7 +121,16 @@ def replay_review(root: Path, revision_id: str, version: dict) -> Notebook:
         for identity in version["review_sections"]:
             chapter = next(c for c in fixed.chapters if c.id == identity)
             frozen = CompositionInput.model_validate(read_json(folder / f"{identity}.input.json"))
-            rebuilt, _ = review_input(fixed, chapter, config, root, baseline, revision_id, step)
+            rebuilt, _ = review_input(
+                fixed,
+                chapter,
+                config,
+                root,
+                baseline,
+                revision_id,
+                step,
+                packet_version=frozen.packet.get("packet_version", 1),
+            )
             if frozen != rebuilt:
                 raise TaskError(f"{identity} 的复审输入与冻结记录不一致")
             result = ReviewResult.model_validate(read_json(folder / f"{identity}.result.json"))

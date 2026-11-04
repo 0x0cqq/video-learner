@@ -13,8 +13,7 @@ from video_learner.common.storage import (
     write_json,
 )
 from video_learner.common.usage import summarize_usage
-from video_learner.exports import export_book
-from video_learner.exports.pdf import font_path
+from video_learner.exports import DEFAULT_FORMATS, export_book, preflight
 from video_learner.notes.composition import validate_notebook
 from video_learner.notes.generation import Generator, create_generator
 from video_learner.notes.prompts import PROMPT_VERSION
@@ -46,7 +45,7 @@ def review(
     pdf_font: Path | None = None,
 ) -> Path:
     """复用原始证据复审整份讲义或指定章节；持有与转换、修订相同的目录锁。"""
-    font_path(pdf_font)
+    preflight(DEFAULT_FORMATS, pdf_font)
     root = workdir.resolve()
     if not contained(root, ".work/manifest.json").is_file():
         raise InputError("此目录没有本工具的工作清单")

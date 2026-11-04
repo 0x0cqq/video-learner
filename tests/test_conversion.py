@@ -28,6 +28,13 @@ def test_replay_reports_changed_input_or_model_draft(converted):
         replay_conversion(root)
     input_path.write_bytes(original)
 
+    # 冻结包版本随数据读取，既有 v2 记录无需迁移也能核对同一转换结果。
+    legacy = json.loads(original)
+    legacy["packet"]["packet_version"] = 2
+    input_path.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+    replay_conversion(root)
+    input_path.write_bytes(original)
+
     draft_path = root / ".work/composition-drafts/ch-001.json"
     draft = json.loads(draft_path.read_text(encoding="utf-8"))
     draft["blocks"][0]["body"] = "与原生成结果不同的正文"

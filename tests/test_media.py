@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -30,9 +31,20 @@ def test_prefix_is_verified_not_suffix(video, tmp_path):
         inspect_source(truncated)
 
 
-def test_inspect_reports_partial_media_failure(video):
-    """有效视频旁有损坏音频时，仍返回诊断，但不能将全部媒体探测标为成功。"""
+@pytest.mark.parametrize("failure", ["corrupt", "unreadable"])
+def test_inspect_reports_partial_media_failure(video, monkeypatch, failure):
+    """候选媒体内容损坏或头部不可读都归一为逐文件诊断，JSON 仍保留有效视频信息。"""
     video.with_name("broken.aac").write_bytes(b"synthetic invalid audio")
+    if failure == "unreadable":
+        original_open = Path.open
+
+        def denied(path, *args, **kwargs):
+            """模拟音频被权限或文件锁阻止读取，其他实际媒体仍正常处理。"""
+            if path.name == "broken.aac":
+                raise PermissionError("synthetic read denial")
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", denied)
     result = CliRunner().invoke(app, ["inspect", str(video.parent), "--json"])
     assert result.exit_code == 1
     source = json.loads(result.stdout)

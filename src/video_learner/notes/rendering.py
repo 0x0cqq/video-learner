@@ -12,7 +12,7 @@ from video_learner.common.core import InputError, TaskError, timestamp
 from video_learner.common.schemas import Chapter, FrameEvidence, NoteBlock, Notebook
 
 MARKDOWN = MarkdownIt("commonmark", {"html": True})
-ANCHOR = re.compile(rb"<!-- vl:(begin|end) (section|block) ([a-z][a-z0-9-]{1,63}) -->")
+ANCHOR = re.compile(rb"<!-- vl:(begin|end) (section|block) ([a-z][a-z0-9_-]{1,63}) -->")
 CATEGORIES = {"original": "原课整理", "ai_addition": "AI 补充解释", "uncertain": "待核对"}
 
 
@@ -99,10 +99,8 @@ def expected_spans(data: bytes, book: Notebook) -> dict[str, Span]:
 def validate_body(body: str) -> None:
     """限制模型正文为可安全嵌入的 Markdown，拒绝自造时间、受控结构和本地资源。
 
-    同时检查代码围栏闭合，避免正文吞掉渲染器随后生成的锚点。
+    代码中的时间常量作为原课数据保留；同时检查围栏闭合，避免吞掉后续锚点。
     """
-    if re.search(r"\b\d{1,3}:\d{2}:\d{2}\b", body):
-        raise TaskError("模型正文不得生成视频时间戳；请只提供证据 ID")
     for token in MARKDOWN.parse(body + "\n"):
         if token.type == "fence":
             # 闭合围栏比正文多首尾两行；补末尾换行使未闭合正文也能准确计数。
@@ -112,6 +110,8 @@ def validate_body(body: str) -> None:
         if token.type in ("html_block", "html_inline"):
             raise TaskError("模型正文不得包含 HTML 或锚点")
         for child in token.children or []:
+            if child.type == "text" and re.search(r"\b\d{1,3}:\d{2}:\d{2}\b", child.content):
+                raise TaskError("模型正文不得生成视频时间戳；请只提供证据 ID")
             if child.type in ("image", "html_inline"):
                 raise TaskError("模型正文不得生成图片路径或 HTML；请使用 figure 块")
             if child.type == "link_open":
@@ -120,6 +120,19 @@ def validate_body(body: str) -> None:
                     raise TaskError("模型正文不得生成本地资源链接")
     if "<!-- vl:" in body:
         raise TaskError("模型正文包含受控锚点字符串")
+
+
+def chapter_texts(current: bytes, book: Notebook) -> dict[str, str]:
+    """按受控锚点读取当前章节文字，保留手改，去掉程序生成的定位行。"""
+    spans = expected_spans(current, book)
+    return {
+        chapter.id: b"".join(
+            line
+            for line in current[spans[chapter.id].start : spans[chapter.id].end].splitlines(True)
+            if not ANCHOR.fullmatch(line.rstrip(b"\r\n"))
+        ).decode("utf-8")
+        for chapter in book.chapters
+    }
 
 
 def normalize_headings(body: str) -> str:

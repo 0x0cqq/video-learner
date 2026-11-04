@@ -135,18 +135,18 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
     opened = True
     for file in files:
         # 联合文件头与媒体扩展名筛选，避免把缓存封面和元数据当作课程视频。
-        with file.open("rb") as handle:
-            signature = handle.read(32)
-        likely_media = (
-            not directory
-            or signature[4:8] == b"ftyp"
-            or signature[:9] == b"0" * 9
-            or signature[:4] in (b"\x1aE\xdf\xa3", b"RIFF", b"OggS")
-            or file.suffix.lower() in (".m4s", ".mp4", ".mkv", ".mov", ".webm", ".aac")
-        )
-        if not likely_media:
-            continue
         try:
+            with file.open("rb") as handle:
+                signature = handle.read(32)
+            likely_media = (
+                not directory
+                or signature[4:8] == b"ftyp"
+                or signature[:9] == b"0" * 9
+                or signature[:4] in (b"\x1aE\xdf\xa3", b"RIFF", b"OggS")
+                or file.suffix.lower() in (".m4s", ".mp4", ".mkv", ".mov", ".webm", ".aac")
+            )
+            if not likely_media:
+                continue
             with open_media(file) as (container, offset):
                 for stream in container.streams:
                     if stream.type not in ("video", "audio"):

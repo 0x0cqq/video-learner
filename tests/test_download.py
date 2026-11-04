@@ -245,3 +245,41 @@ def test_conversion_credentials_checked_before_download(tmp_path, monkeypatch, m
     )
     assert "凭据" in result.output and not calls
     assert not downloads.exists() and not output.exists()
+
+
+@pytest.mark.parametrize("invalid", ["subtitle_missing", "subtitle_type", "time", "font"])
+def test_static_input_errors_precede_download_and_force_deletion(tmp_path, monkeypatch, invalid):
+    """素材无关的字幕、时间和字体错误在下载与强制删除之前报告，保留已有手改。"""
+    calls = []
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "video_learner.media.download.YoutubeDL", lambda options: calls.append(options)
+    )
+    output, downloads = tmp_path / "output", tmp_path / "downloads"
+    output.mkdir()
+    marker = output / "manual.md"
+    marker.write_text("保留手改", encoding="utf-8")
+    options = {}
+    if invalid.startswith("subtitle"):
+        path = tmp_path / ("missing.srt" if invalid == "subtitle_missing" else "wrong.txt")
+        if invalid == "subtitle_type":
+            path.write_text("unsupported", encoding="utf-8")
+        options["subtitle"] = path
+    elif invalid == "font":
+        path = tmp_path / "invalid.ttf"
+        path.write_bytes(b"not a TrueType font")
+        options["pdf_font"] = path
+    else:
+        options.update(start="2", end="1")
+    invoke(
+        "convert",
+        "https://example.test/video",
+        output=output,
+        download_dir=downloads,
+        force=True,
+        code=2,
+        **options,
+    )
+    assert not calls and not downloads.exists()
+    assert marker.read_text(encoding="utf-8") == "保留手改"

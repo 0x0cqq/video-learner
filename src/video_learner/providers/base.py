@@ -3,7 +3,7 @@
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -22,14 +22,21 @@ class ModelRequest:
 
 
 @dataclass(frozen=True)
+class ModelUsage:
+    """服务端已返回的计量，成功与失败通道均可携带；空值表示未知。"""
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+
+
+@dataclass(frozen=True)
 class ModelResponse:
     """最终正文、完成状态及服务端计量；不含内部思考文本。"""
 
     text: str
     completed: bool
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    cached_input_tokens: int | None = None
+    usage: ModelUsage = field(default_factory=ModelUsage)
 
 
 class Provider(Protocol):
@@ -37,16 +44,19 @@ class Provider(Protocol):
 
 
 class ProviderError(Exception):
-    """只暴露错误类别和 HTTP 状态，供业务层决定重试，不携带服务端敏感正文。"""
+    """携带受控错误和已知计量，供业务层决定重试；不携带服务端敏感正文。"""
 
     def __init__(
         self,
-        kind: Literal["status", "connection", "service"],
+        kind: Literal["status", "connection", "service", "incomplete", "cancelled"],
         error_type: str,
         status_code: int | None = None,
+        *,
+        usage: ModelUsage | None = None,
     ):
         super().__init__(error_type)
         self.kind, self.error_type, self.status_code = kind, error_type, status_code
+        self.usage = usage
 
 
 @contextmanager

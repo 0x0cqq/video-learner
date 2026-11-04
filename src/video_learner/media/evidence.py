@@ -1,6 +1,7 @@
 """固定时间范围的音频、转写和候选画面；不包含模型自主工具循环。"""
 
 import re
+from io import BytesIO
 from pathlib import Path
 
 import av
@@ -60,6 +61,19 @@ def audio_window(path: Path, source: Source, start_us: int, end_us: int) -> np.n
     return result
 
 
+def validate_subtitle_file(path: Path) -> None:
+    """在下载前检查显式字幕是否存在、格式和大小受支持且可读取。"""
+    if not path.is_file():
+        raise InputError("字幕文件不存在")
+    if path.suffix.lower() not in (".srt", ".vtt") or path.stat().st_size > 20_000_000:
+        raise InputError("字幕必须是小于 20 MB 的 SRT/VTT")
+    try:
+        with path.open("rb") as handle:
+            handle.read(1)
+    except OSError as exc:
+        raise InputError("字幕文件不可读") from exc
+
+
 def load_subtitles(
     path: Path,
     start_us: int,
@@ -70,10 +84,7 @@ def load_subtitles(
 
     覆盖率按时间区间并集计算，重叠字幕不重复计数；时间合法不代表语音同步。
     """
-    if not path.is_file():
-        raise InputError("字幕文件不存在")
-    if path.suffix.lower() not in (".srt", ".vtt") or path.stat().st_size > 20_000_000:
-        raise InputError("字幕必须是小于 20 MB 的 SRT/VTT")
+    validate_subtitle_file(path)
     content = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
     origin = path.suffix.lower()[1:]
     result = []
@@ -146,8 +157,9 @@ def register_frame(
     image, actual, pts = extract_frame(path, source, at_us, end_us)
     relative = f".work/frames/{identity}.png"
     selected = contained(root, relative)
-    selected.parent.mkdir(parents=True, exist_ok=True)
-    image.save(selected, format="PNG")
+    with BytesIO() as encoded:
+        image.save(encoded, format="PNG")
+        atomic_bytes(selected, encoded.getvalue())
     return FrameEvidence(
         id=identity,
         at_us=actual,

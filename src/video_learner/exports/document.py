@@ -19,6 +19,8 @@ from PIL import Image
 
 from video_learner.common.core import InputError, contained
 from video_learner.common.schemas import Notebook
+from video_learner.common.storage import digest
+from video_learner.notes.composition import validate_notebook_structure
 from video_learner.notes.rendering import (
     expected_spans,
     image_dependencies,
@@ -152,6 +154,7 @@ class ExportDocument:
     book: Notebook
     parts: tuple[DocumentPart, ...]
     images: dict[str, Path]
+    image_hashes: dict[str, str]
 
     @property
     def markdown(self) -> bytes:
@@ -165,6 +168,7 @@ def prepare_document(
 
     Markdown 字节用于无损导出，HTML/PDF 直接消费同一快照的语法节点。
     """
+    validate_notebook_structure(book)
     data = render_notes(book) if markdown is None else markdown
     expected_spans(data, book)
     book = book.model_copy(deep=True)
@@ -176,21 +180,26 @@ def prepare_document(
             ("review", render_review(book)),
         )
     )
-    frames = {f"assets/{frame.id}.png": frame.path for frame in book.frames}
+    frames = {f"assets/{frame.id}.png": frame for frame in book.frames}
     images = {}
+    image_hashes = {}
     for reference in image_dependencies(data):
         relative = local_image(reference)
         original = contained(base, relative) if base is not None else None
         if original is None or not original.is_file():
             original = (
-                contained(evidence_root, frames[relative]) if relative in frames else original
+                contained(evidence_root, frames[relative].path) if relative in frames else original
             )
         if original is None or not original.is_file():
             raise InputError(f"图片依赖缺失：{relative}")
+        current_hash = digest(original)
+        if relative in frames and current_hash != frames[relative].sha256:
+            raise InputError(f"登记截图内容已改变：{relative}；请恢复图片或用 revise --frame 换图")
         try:
             with Image.open(original) as image:
                 image.verify()
         except (OSError, ValueError) as exc:
             raise InputError(f"图片损坏或格式不支持：{relative}") from exc
         images[relative] = original
-    return ExportDocument(book, parts, images)
+        image_hashes[relative] = current_hash
+    return ExportDocument(book, parts, images, image_hashes)

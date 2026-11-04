@@ -61,6 +61,27 @@ def fingerprint_source(path: Path, source: Source, subtitle: Path | None = None)
     return {str(file): digest(file) for file in sorted(files)}
 
 
+def protect_source_output(root: Path, target: Path) -> None:
+    """已知本机来源时保护原媒体目录；可携带版本不要求原媒体或工作清单存在。"""
+    local_path = contained(root, ".work/source-local.json")
+    if not local_path.is_file() and root.parent.name == "revisions":
+        local_path = contained(root.parent.parent, ".work/source-local.json")
+    if not local_path.is_file():
+        return
+    local = read_json(local_path)
+    if not isinstance(local.get("path"), str) or not isinstance(local.get("files"), dict):
+        raise InputError("本机来源清单无效")
+    source = Path(local["path"]).resolve()
+    # 文件输入本身也在指纹表中；目录输入只登记目录内文件，原媒体移走后仍可判断。
+    media_root = source.parent if str(source) in local["files"] else source
+    if (
+        target == media_root
+        or target.is_relative_to(media_root)
+        or media_root.is_relative_to(target)
+    ):
+        raise InputError("导出目录不能与原媒体目录重叠")
+
+
 def baseline_config(manifest: dict) -> Config:
     """加载已保存版本的设置并核对提取指纹；读取旧上下文字段时统一其名称。"""
     if manifest.get("extraction_version") != 4:

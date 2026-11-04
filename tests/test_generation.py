@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from model_fakes import VALID, packet, session
 
@@ -85,3 +87,52 @@ def test_provider_errors_keep_common_retry_policy_and_hide_service_body(
         assert len(client.requests) == 2
     log = (tmp_path / ".work/logs/events.jsonl").read_text(encoding="utf-8")
     assert "private-provider-error" not in log
+
+
+def test_review_repair_is_rechecked_before_spending_another_call(tmp_path, supplier):
+    """首请求在预算内，追加完整失败草稿后的修复请求越界时不得继续调用供应商。"""
+    from video_learner.common.config import ReviewStep
+
+    value = packet()
+    block = {**json.loads(VALID)["blocks"][0], "id": "blk-001-001", "chapter_id": "ch-001"}
+    value.update(
+        operation="review",
+        chapter_id="ch-001",
+        revision_id="r002",
+        current_review=[],
+        review_step=ReviewStep(name="content", kind="content").model_dump(),
+        chapter={
+            "id": "ch-001",
+            "title": "标题",
+            "start_us": 0,
+            "end_us": 1_000_000,
+            "status": "completed",
+            "blocks": [block],
+        },
+    )
+    invalid = json.dumps(
+        {
+            "frames": None,
+            "resolved_review_ids": [],
+            "findings": [
+                {
+                    "target_id": block["id"],
+                    "kind": "fidelity",
+                    "reason": "核对证据",
+                    "evidence_ids": ["unknown"],
+                    "action": "replace",
+                    "blocks": [{**json.loads(VALID)["blocks"][0], "body": "x" * 19000}],
+                }
+            ],
+        }
+    )
+    generator, client = session(
+        tmp_path,
+        supplier,
+        [invalid, '{"frames":null,"findings":[]}'],
+        context_token_budget=35000,
+        max_retries=1,
+    )
+    with pytest.raises(TaskError, match="预算"):
+        generator.review(value, [])
+    assert len(client.requests) == generator.calls == 1

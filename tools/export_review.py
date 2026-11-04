@@ -11,6 +11,7 @@ from video_learner.common.storage import directory_lock, read_json
 from video_learner.exports import export_book
 from video_learner.notes.composition import evidence_packet, validate_draft, validate_notebook
 from video_learner.notes.rendering import render_notes
+from video_learner.workflows.versions import protect_source_output
 
 
 def export_review(root: Path, edited: Path, output: Path) -> Path:
@@ -19,14 +20,7 @@ def export_review(root: Path, edited: Path, output: Path) -> Path:
     target = output_path(root, output)
     baseline = Notebook.model_validate(read_json(root / "notes.json"))
     book = Notebook.model_validate(read_json(edited))
-    local_source = Path(read_json(root / ".work/source-local.json")["path"]).resolve()
-    media_root = local_source.parent if baseline.source.adapter == "local" else local_source
-    if (
-        target == media_root
-        or target.is_relative_to(media_root)
-        or media_root.is_relative_to(target)
-    ):
-        raise InputError("审阅输出目录不能与原媒体目录重叠")
+    protect_source_output(root, target)
     if (root / "notes.md").read_bytes() != render_notes(baseline):
         raise InputError("基线 Markdown 有手改，请先显式合并到校订稿，避免遗漏手改")
     for key in ("source", "transcript", "frames", "start_us", "end_us"):

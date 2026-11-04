@@ -19,9 +19,13 @@ from video_learner.common.storage import (
     write_json,
 )
 from video_learner.common.usage import summarize_usage
-from video_learner.exports import export_book
-from video_learner.exports.pdf import font_path
-from video_learner.media.evidence import load_subtitles, sample_frames, save_transcript
+from video_learner.exports import DEFAULT_FORMATS, export_book, preflight
+from video_learner.media.evidence import (
+    load_subtitles,
+    sample_frames,
+    save_transcript,
+    validate_subtitle_file,
+)
 from video_learner.media.io import track_of
 from video_learner.notes.composition import (
     apply_chapter_draft,
@@ -64,7 +68,12 @@ def convert(
     force 在预检通过并持锁后删除原输出；后续转换失败不会恢复被删除的旧结果。
     失败保留诊断产物并抛异常，这些文件不代表可恢复任务或可修订的成功版本。
     """
-    font_path(pdf_font)
+    preflight(DEFAULT_FORMATS, pdf_font)
+    if start_us < 0 or (end_us is not None and end_us <= start_us):
+        raise InputError("时间范围必须满足 0 <= start < end")
+    if subtitle is not None:
+        subtitle = subtitle.resolve()
+        validate_subtitle_file(subtitle)
     if generator is None:
         validate_provider_config(config)
     if subtitle is None:

@@ -8,9 +8,9 @@ from pydantic import ValidationError
 from video_learner.common.core import InputError, contained, output_path
 from video_learner.common.schemas import Notebook
 from video_learner.common.storage import digest, directory_lock, read_json, write_json
-from video_learner.exports import ExportFormat, prepare_document, write_document
+from video_learner.exports import ExportFormat, preflight, prepare_document, write_document
 from video_learner.notes.rendering import render_notes
-from video_learner.workflows.versions import load_baseline
+from video_learner.workflows.versions import load_baseline, protect_source_output
 
 
 def export(
@@ -27,6 +27,8 @@ def export(
     """
     root = source.resolve()
     target = output_path(root, output)
+    protect_source_output(root, target)
+    preflight(formats, pdf_font)
     if base is not None:
         _, directory, book, snapshot = load_baseline(root, base)
     else:
@@ -46,7 +48,6 @@ def export(
         book.sync_status = "manual_unverified"
     document = prepare_document(book, root, current, base=directory)
     # 导出使用实际文稿和版本图片，即使原视频或缓存已移走，也能独立工作。
-    initial.update({path: digest(path) for path in document.images.values()})
     target.parent.mkdir(parents=True, exist_ok=True)
     with directory_lock(target.parent / f".{target.name}.lock"):
         if target.exists():

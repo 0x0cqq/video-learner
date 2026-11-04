@@ -16,7 +16,13 @@ from video_learner.common.schemas import Draft, ReviewResult
 from video_learner.common.storage import Events, atomic_bytes
 from video_learner.notes.prompts import GENERATION_TASK, PROMPT_VERSION, SYSTEM_PROMPT
 from video_learner.notes.review_prompts import review_prompt
-from video_learner.providers.base import ModelRequest, Provider, ProviderError, create_provider
+from video_learner.providers.base import (
+    ModelRequest,
+    ModelUsage,
+    Provider,
+    ProviderError,
+    create_provider,
+)
 
 
 class Generator(Protocol):
@@ -145,6 +151,20 @@ class NoteGenerator:
         """独立复审，不继承生成会话；共用实际调用预算、用量和有界修复。"""
         return self._generate(packet, images, ReviewResult)
 
+    def _record_usage(self, usage: ModelUsage, started: float) -> None:
+        """统一登记单次请求的已知计量，错误通道也遵循相同计费口径。"""
+        self.events.emit(
+            "model_usage",
+            "received",
+            call=self.calls,
+            model=self.config.model,
+            prompt_version=PROMPT_VERSION,
+            seconds=time.monotonic() - started,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
+        )
+
     def _generate[T: (Draft, ReviewResult)](
         self, packet: dict, images: list[tuple[str, Path]], response_type: type[T]
     ) -> T:
@@ -198,10 +218,11 @@ class NoteGenerator:
             image_count=len(images),
         )
         repair = None
-        self._prepare_history(content, packet)
         for attempt in range(self.config.max_retries + 1):
             if self.calls >= self.config.max_calls:
                 raise TaskError("达到模型调用次数上限，剩余章节未完成")
+            request_content = content + ([{"type": "text", "text": repair}] if repair else [])
+            self._prepare_history(request_content, packet)
             self.calls += 1
             started = time.monotonic()
             self.events.emit(
@@ -218,24 +239,14 @@ class NoteGenerator:
                 self._last_input = self._request_prefix + [
                     {
                         "role": "user",
-                        "content": content + ([{"type": "text", "text": repair}] if repair else []),
+                        "content": request_content,
                     }
                 ]
                 response = self.provider.generate(
                     ModelRequest(self._system_prompt, self._schema, self._last_input),
                     call=self.calls,
                 )
-                self.events.emit(
-                    "model_usage",
-                    "received",
-                    call=self.calls,
-                    model=self.config.model,
-                    prompt_version=PROMPT_VERSION,
-                    seconds=time.monotonic() - started,
-                    input_tokens=response.input_tokens,
-                    output_tokens=response.output_tokens,
-                    cached_input_tokens=response.cached_input_tokens,
-                )
+                self._record_usage(response.usage, started)
                 if not response.completed:
                     self.events.emit("model_call", "incomplete", call=self.calls)
                     raise TaskError("模型输出未完成，可能达到输出限制")
@@ -318,14 +329,20 @@ class NoteGenerator:
                     + "。必须返回完整对象，严格符合当前 JSON schema。"
                 )
             except ProviderError as exc:
+                if exc.usage is not None:
+                    self._record_usage(exc.usage, started)
                 self.events.emit(
                     "model_call",
-                    "failed",
+                    "cancelled" if exc.kind == "cancelled" else "failed",
                     call=self.calls,
                     error_type=exc.error_type,
                     **({"status_code": exc.status_code} if exc.status_code is not None else {}),
                     seconds=time.monotonic() - started,
                 )
+                if exc.kind == "cancelled":
+                    raise KeyboardInterrupt from None
+                if exc.kind == "incomplete":
+                    raise TaskError("模型响应未完成，超过响应时间或大小上限") from None
                 if exc.kind == "status" and exc.status_code not in (408, 409, 429):
                     if exc.status_code < 500:
                         raise InputError(

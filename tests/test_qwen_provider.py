@@ -2,6 +2,7 @@ import pytest
 from model_fakes import VALID, Stream, chunk, packet, session
 
 from video_learner.common.core import TaskError
+from video_learner.common.usage import summarize_usage
 
 
 @pytest.mark.parametrize("finish", [None, "length"])
@@ -40,3 +41,41 @@ def test_qwen_disconnect_discards_partial_answer_and_repairs_schema(tmp_path, mo
         p.read_text(encoding="utf-8") for p in (tmp_path / ".work/model-responses").glob("*.json")
     ]
     assert sorted(saved) == sorted(["[]", VALID])
+
+
+@pytest.mark.parametrize("failure", ["service", "cancelled"])
+def test_qwen_failure_preserves_already_received_usage(tmp_path, failure):
+    """服务端计量先于流错误或用户中断到达时，失败调用仍保留已知计费信息。"""
+    from types import SimpleNamespace as NS
+
+    import httpx2
+    from openai import APIError
+
+    error = (
+        KeyboardInterrupt()
+        if failure == "cancelled"
+        else APIError(
+            "private-error", request=httpx2.Request("POST", "https://example.invalid"), body=None
+        )
+    )
+    stream = Stream(
+        [
+            chunk(content=VALID, finish="stop"),
+            chunk(
+                usage=NS(
+                    prompt_tokens=1234,
+                    completion_tokens=567,
+                    prompt_tokens_details=NS(cached_tokens=100),
+                )
+            ),
+            error,
+        ]
+    )
+    service, client = session(tmp_path, "qwen", [stream], max_retries=0)
+    with pytest.raises(KeyboardInterrupt if failure == "cancelled" else TaskError):
+        service.compose(packet(), [])
+    report = summarize_usage(service.events.usage_events, service.config)
+    assert report["input_tokens"] == 1234 and report["output_tokens"] == 567
+    assert report["models"][0]["cached_input_tokens"] == 100
+    assert report["missing_token_usage"] == 0
+    assert stream.closed and len(client.requests) == 1

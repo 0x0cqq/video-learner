@@ -20,6 +20,7 @@ from video_learner.common.schemas import (
     TranscriptSegment,
 )
 from video_learner.common.storage import digest
+from video_learner.notes.rendering import chapter_texts
 
 
 def plan_chapters(
@@ -66,15 +67,21 @@ def evidence_packet(
     current_markdown: str | None = None,
     target_ids: list[str] | None = None,
     *,
-    packet_version: int = 2,
+    packet_version: int = 3,
+    current_document: bytes | None = None,
 ) -> tuple[dict, list[tuple[str, Path]]]:
     """组装目标范围的可引用证据及受控本地图片路径，供转换或局部修订使用。
 
     相邻十秒转写与上一章末尾仅帮助衔接，不可引用；图片超限时均匀取样，避免丢掉章尾。
-    新包明确上下文方向及帧所在的真实语音窗口；版本 1 仅供旧冻结输入离线重建。
+    版本 3 的修订上下文读取当前文稿；旧包版本仅供已冻结输入离线重建。
     """
     context_start = max(book.start_us, chapter.start_us - 10 * US)
     context_end = min(book.end_us, chapter.end_us + 10 * US)
+    current_sections = (
+        chapter_texts(current_document, book)
+        if packet_version >= 3 and current_document is not None
+        else {}
+    )
     segments = [
         s for s in book.transcript if s.start_us < chapter.end_us and s.end_us > chapter.start_us
     ]
@@ -103,7 +110,13 @@ def evidence_packet(
         "adjacent_context_not_citable": context,
         "previous_chapter_not_citable": next(
             (
-                {"title": c.title, "ending": "\n".join(b.body for b in c.blocks)[-3000:]}
+                {
+                    # 当前片段含手改标题，不混入旧索引标题；旧包保留原结构供重放。
+                    **({"title": c.title} if not current_sections else {}),
+                    "ending": current_sections.get(c.id, "\n".join(b.body for b in c.blocks))[
+                        -3000:
+                    ],
+                }
                 for c in reversed(book.chapters)
                 if c.end_us <= chapter.start_us and c.status == "completed"
             ),
@@ -141,7 +154,7 @@ def composition_input(
     config: Config,
     root: Path,
     *,
-    packet_version: int = 2,
+    packet_version: int = 3,
 ) -> tuple[CompositionInput, list[tuple[str, Path]]]:
     """冻结转换章节的证据包和图片身份，供调用及离线重放共用。"""
     packet, images = evidence_packet(book, chapter, config, root, packet_version=packet_version)
@@ -329,11 +342,8 @@ def chapter_review(
     return items
 
 
-def validate_notebook(book: Notebook, root: Path) -> None:
-    """机械校验整份讲义的时间覆盖、唯一 ID、证据引用及缓存图片完整性。
-
-    同时核对图片 PTS 与规范时间、文件哈希和可解码性。
-    """
+def validate_notebook_structure(book: Notebook) -> None:
+    """离线校验讲义的时间覆盖、唯一 ID、证据和疑点关系，不访问媒体或工作缓存。"""
     if not 0 <= book.start_us < book.end_us <= book.source.duration_us:
         raise TaskError("文档范围越界")
     evidence = {}
@@ -348,16 +358,6 @@ def validate_notebook(book: Notebook, root: Path) -> None:
             raise TaskError("图像证据时间越界或 ID 重复")
         if int(frame.pts * Fraction(frame.time_base) * US) - frame.origin_us != frame.at_us:
             raise TaskError("图像 PTS 与实际时间不一致")
-        path = contained(root, frame.path)
-        if not path.is_file():
-            raise TaskError("图像证据资源缺失")
-        if digest(path) != frame.sha256:
-            raise TaskError("图像证据缓存内容已改变，请重新转换到独立目录")
-        try:
-            with Image.open(path) as image:
-                image.verify()
-        except (OSError, ValueError) as exc:
-            raise TaskError("图像证据缓存损坏") from exc
         evidence[frame.id] = frame
     expected_start = book.start_us
     identities = set()
@@ -390,3 +390,19 @@ def validate_notebook(book: Notebook, root: Path) -> None:
             raise TaskError("待核对项引用未知证据")
         if item.block_id is not None and item.block_id not in identities:
             raise TaskError("待核对项引用未知章节或块")
+
+
+def validate_notebook(book: Notebook, root: Path) -> None:
+    """先校验讲义语义，再核对工作缓存图片的存在、登记哈希和可解码性。"""
+    validate_notebook_structure(book)
+    for frame in book.frames:
+        path = contained(root, frame.path)
+        if not path.is_file():
+            raise TaskError("图像证据资源缺失")
+        if digest(path) != frame.sha256:
+            raise TaskError("图像证据缓存内容已改变，请重新转换到独立目录")
+        try:
+            with Image.open(path) as image:
+                image.verify()
+        except (OSError, ValueError) as exc:
+            raise TaskError("图像证据缓存损坏") from exc

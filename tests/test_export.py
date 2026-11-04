@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from markdown_it import MarkdownIt
 
-from video_learner.common.core import InputError
-from video_learner.common.storage import read_json
+from video_learner.common.core import InputError, TaskError
+from video_learner.common.storage import read_json, write_json
 from video_learner.exports.document import parser
 from video_learner.workflows.exporting import export
 
@@ -87,7 +87,7 @@ def test_export_rejects_unavailable_or_external_images(converted, tmp_path, refe
 
 def test_export_failure_preserves_source_and_publishes_nothing(converted, tmp_path):
     """后一个适配器失败也不留下已生成的 HTML，已有目录和源讲义保持不变。"""
-    root, _ = converted
+    root, video = converted
     original = (root / "notes.md").read_bytes()
     target = tmp_path / "failed"
     with pytest.raises(InputError):
@@ -101,3 +101,58 @@ def test_export_failure_preserves_source_and_publishes_nothing(converted, tmp_pa
     with pytest.raises(InputError):
         export(root, target, ["html"])
     assert (target / "keep.txt").read_text(encoding="utf-8") == "keep"
+    video.unlink()
+    with pytest.raises(InputError, match="原媒体目录"):
+        export(root, video.parent / "reading", ["markdown"])
+
+
+@pytest.mark.parametrize("damage", ["screenshot", "transcript", "coverage"])
+def test_export_rejects_changed_evidence_and_invalid_structure(converted, tmp_path, damage):
+    """有效位图替换、越界转写及章节空洞均不能借离线导出变成成功阅读副本。"""
+    from PIL import Image
+
+    root, _ = converted
+    book = read_json(root / "notes.json")
+    if damage == "screenshot":
+        Image.new("RGB", (160, 96), "magenta").save(root / "assets/frame-000001.png")
+    else:
+        if damage == "transcript":
+            book["transcript"][0]["end_us"] = book["end_us"] + 1_000_000
+        else:
+            book["chapters"][0]["start_us"] += 1
+        write_json(root / "notes.json", book)
+    target = tmp_path / "invalid-reading"
+    with pytest.raises((InputError, TaskError)):
+        export(root, target, ["markdown"])
+    assert not target.exists()
+    if damage == "screenshot":
+        from model_fakes import DeterministicGenerator
+
+        from video_learner.workflows.revision import revise
+
+        with pytest.raises(InputError, match="登记截图"):
+            revise(root, section="ch-001", instruction="重组", generator=DeterministicGenerator())
+        assert not (root / "revisions/r002").exists()
+        assert set(read_json(root / ".work/manifest.json")["versions"]) == {"r001"}
+
+
+def test_image_edit_during_adapter_prevents_publication(converted, tmp_path, monkeypatch):
+    """适配器工作期间图片被编辑时，三格式共用快照检查阻止发布混合资源。"""
+    from PIL import Image
+
+    from video_learner.exports import html
+
+    root, _ = converted
+    original_write = html.write
+
+    def changed_image(document, destination):
+        """模拟独立图片编辑器在 HTML 已消费图片后保存新画面。"""
+        warnings = original_write(document, destination)
+        Image.new("RGB", (160, 96), "magenta").save(next(iter(document.images.values())))
+        return warnings
+
+    monkeypatch.setattr(html, "write", changed_image)
+    target = tmp_path / "concurrent-image"
+    with pytest.raises(InputError, match="图片发生变化"):
+        export(root, target, ["html", "markdown"])
+    assert not target.exists()

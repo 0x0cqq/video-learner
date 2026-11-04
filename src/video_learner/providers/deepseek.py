@@ -7,6 +7,7 @@ from video_learner.common.storage import Events
 from video_learner.providers.base import (
     ModelRequest,
     ModelResponse,
+    ModelUsage,
     credential,
     provider_errors,
     validate_provider_config,
@@ -62,9 +63,11 @@ class DeepSeekProvider:
             return ModelResponse(
                 text=response.output_text,
                 completed=response.status == "completed",
-                input_tokens=getattr(usage, "input_tokens", None),
-                output_tokens=getattr(usage, "output_tokens", None),
-                cached_input_tokens=getattr(
-                    getattr(usage, "input_tokens_details", None), "cached_tokens", None
+                usage=ModelUsage(
+                    input_tokens=getattr(usage, "input_tokens", None),
+                    output_tokens=getattr(usage, "output_tokens", None),
+                    cached_input_tokens=getattr(
+                        getattr(usage, "input_tokens_details", None), "cached_tokens", None
+                    ),
                 ),
             )

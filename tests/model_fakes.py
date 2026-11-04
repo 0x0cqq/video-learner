@@ -67,7 +67,7 @@ class Stream:
     def __iter__(self):
         """按顺序交付流式块，遇异常实例就在迭代中抛出，用于模拟收到部分正文后断线。"""
         for value in self.chunks:
-            if isinstance(value, Exception):
+            if isinstance(value, BaseException):
                 raise value
             yield value
 
