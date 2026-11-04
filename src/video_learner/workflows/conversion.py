@@ -32,12 +32,13 @@ from video_learner.notes.composition import (
 from video_learner.notes.generation import Generator, create_generator
 from video_learner.notes.prompts import PROMPT_VERSION
 from video_learner.providers.base import validate_provider_config
+from video_learner.workflows.ingestion import resolve_source
 from video_learner.workflows.transcription import transcribe, validate_asr_config
 from video_learner.workflows.versions import extraction_hash, fingerprint_source
 
 
 def convert(
-    source_path: Path,
+    source_path: Path | str,
     output: Path,
     config: Config,
     start_us: int = 0,
@@ -48,16 +49,20 @@ def convert(
     usage_report: Callable[[dict], None] | None = None,
     force: bool = False,
     pdf_font: Path | None = None,
+    download_dir: Path | None = None,
 ) -> Path:
-    """编排单视频转换，在独占锁内提取证据、组织章节并提交新输出目录。
+    """统一三个输入入口，在独占锁内提取证据、组织章节并提交新输出目录。
 
-    输入与凭据预检通过后才创建工作目录；仅全部章节完成才登记 r001。
+    URL 先下载到独立素材目录；输入与凭据预检通过后才创建讲义工作目录。
+    仅全部章节完成才登记 r001。
     默认随后独立复审并返回 r002；复审失败保留 r001，费用计入同一次转换。
     force 在预检通过并持锁后删除原输出；后续转换失败不会恢复被删除的旧结果。
     失败保留诊断产物并抛异常，这些文件不代表可恢复任务或可修订的成功版本。
     """
     font_path(pdf_font)
-    source_path = source_path.resolve()
+    source_path = resolve_source(
+        source_path, download_dir, output=output, force=force, progress=progress
+    )
     target = output_path(source_path, output, force=force)
     source = inspect_source(source_path)
     if source.diagnostics:

@@ -56,6 +56,8 @@ def fingerprint_source(path: Path, source: Source, subtitle: Path | None = None)
         files.add(subtitle.resolve())
     if path.is_dir() and (path / "videoInfo.json").is_file():
         files.add((path / "videoInfo.json").resolve())
+    if path.is_dir() and (path / "download.json").is_file():
+        files.add((path / "download.json").resolve())
     return {str(file): digest(file) for file in sorted(files)}
 
 

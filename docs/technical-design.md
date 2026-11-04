@@ -6,7 +6,7 @@
 
 ## 1. 架构与依赖
 
-单视频/单课时缓存 → 图文 Markdown → 核对 → 局部修订 → 独立版本。P0 为 US-01/02/03/04/05/08/10，命令为 `inspect`、`convert`、`revise`、`export`。没有批量课程、前端、问答、学习管理、知识库或练习系统，US-09 保持删除。
+在线单视频/本地视频/单课时缓存 → 图文 Markdown → 核对 → 局部修订 → 独立版本。P0 为 US-01/02/03/04/05/08/10，命令为 `inspect`、`convert`、`revise`、`export`。没有批量课程、前端、问答、学习管理、知识库或练习系统，US-09 保持删除。
 
 | 职责 | 当前实现 |
 | --- | --- |
@@ -14,6 +14,7 @@
 | CLI | Typer/Rich，参数、错误提示与 stderr 阶段进度；详细模式见[使用指南](usage.md#终端进度与详细日志) |
 | 应用 | workflows 编排转换、转写、修订、复审、只读重放和阅读导出；versions.py 共用工作目录与版本规则；不依赖 Typer 对象 |
 | 媒体 | PyAV，只读偏移流、轨道探测、seek、音频重采样 |
+| 在线输入 | 默认安装 yt-dlp；单视频下载、原子发布到独立素材目录，再进入 PyAV 共用流程 |
 | 图片 | Pillow/NumPy，全帧灰度变化、周期候选覆盖 |
 | ASR | 默认 Qwen，可选 faster-whisper CPU/CUDA，共用有界音频切片 |
 | 多模态 | DeepSeek deepseek-flash / Qwen qwen3.8-flash，单次 Provider.generate 接口与共用讲义生成层 |
@@ -30,7 +31,7 @@
 
 | 顺序 | 源码与数据变化 | 保存的结果 |
 | --- | --- | --- |
-| 1. 检查与准备 | `media/io.py:inspect_source()` 产生 `Source`；`versions.py:fingerprint_source()` 核对实际媒体、元数据和显式字幕 | `.work/source-local.json` 保存本机来源与文件哈希；`.work/manifest.json` 保存运行状态、范围和配置；`.work/logs/events.jsonl` 追加阶段事件 |
+| 1. 检查与准备 | `workflows/ingestion.py:resolve_source()` 将在线或本地输入统一为素材路径；`media/io.py:inspect_source()` 产生 `Source`；`versions.py:fingerprint_source()` 核对实际媒体、元数据和显式字幕 | URL 的下载素材另存于下载目录，见[导入契约](#2-导入与规范时间线)；`.work/source-local.json` 保存本机来源与文件哈希；`.work/manifest.json` 保存运行状态、范围和配置；`.work/logs/events.jsonl` 追加阶段事件 |
 | 2. 转写 | `workflows/transcription.py:transcribe()` 调用 `media/evidence.py:audio_window()`，按真实音频窗口取得 `TranscriptSegment`；显式 SRT/VTT 则由 `load_subtitles()` 提供片段 | `transcript.jsonl` 保存逐条转写证据；ASR 路径另存 `.work/audio/audio-*.wav`、同名 `.json` 时间映射及 `.work/asr-responses/audio-*.json` 识别文本；字幕路径另存 `.work/subtitle-check.json` |
 | 3. 候选画面 | `media/evidence.py:sample_frames()` 扫描变化，`register_frame()` 登记实际 PTS、时间、图片路径和哈希，形成 `FrameEvidence` | `.work/frame-scan.json`、`.work/frames.json` 与 `.work/frames/frame-*.png`；这些是候选完整帧 |
 | 4. 章节与模型前证据 | `notes/composition.py:plan_chapters()` 划分连续范围；`composition_input()` 从当前 `Notebook` 构造逐章证据包 | `.work/evidence.json` 保存整理前的转写、候选帧和章节计划；每章调用前写入 `.work/composition-inputs/ch-*.json`，包含实际证据包与图片身份 |
@@ -42,7 +43,13 @@
 
 ## 2. 导入与规范时间线
 
-支持普通单视频和已验证 Bilibili 单课时缓存。文件名只提供线索，编码以实际轨道探测为准。读取课程/课时标题和 BVID，有不同的 groupTitle 时组合为“课程 · 课时”，缺失标题回退到文件名；不读取或记录签名下载 URL。发现独立 SRT/VTT，弹幕不当作字幕。
+三个并列入口为 yt-dlp 在线单视频 URL/BVID、已验证 Bilibili 单课时本地缓存和普通本地视频。`workflows/ingestion.py:resolve_source()` 将输入统一为本地绝对路径，CLI 保留字符串参数以免把 URL 转成 Windows 路径。文件名只提供线索，编码以实际轨道探测为准。读取课程/课时标题和 BVID，有不同的 groupTitle 时组合为“课程 · 课时”，缺失标题回退到文件名。发现独立 SRT/VTT，弹幕不当作字幕。
+
+在线输入由 `media/download.py` 通过 [yt-dlp Python API](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp) 获取：仅接受无内嵌账号密码的 HTTP(S) URL 或完整 BVID，保留查询参数；`noplaylist` 使视频链接不扩展合集，Bilibili `?p=` 选指定 P，裸 BV/未选 P 取第一 P。预提取返回播放列表或直播时拒绝下载。默认分别下载最佳独立视频和音轨，没有分离格式时取合流素材，不合并、不转码；特殊站点协议仍可能需要 yt-dlp 的额外运行依赖。
+
+默认下载到当前工作目录的 `.cache/downloads/<随机ID>/`，`--download-dir` 可指定根目录。每次 URL 调用独立下载完整视频；`--start`/`--end` 仅限制后续转换，未实现下载缓存匹配或任务恢复。下载在同根临时目录完成，使用固定媒体文件名，经唯一音视频轨道检查和抽查解码后 rename 发布；失败/中断清理本次临时目录。`download.json` 仅保存标题和可选 BVID，来源适配器为 `yt-dlp`，元数据与实际媒体均参与修订指纹。成功素材保留用于离线修订、换图；可直接将该目录交给 inspect/convert，避免重复下载。
+
+URL 获取前拒绝下载根目录和讲义输出重叠，并沿用输出已存在/强制覆盖保护。下载目录有独立 `.work/logs/events.jsonl`，事件仅记录阶段、字节进度、耗时和成功素材路径；终端显示下载阶段及保存路径。原始站点信息、输入 URL、签名媒体 URL、请求头不落盘；第三方原始日志不透传，下载错误显示无敏感信息的诊断。默认不读取浏览器登录信息；登录或地区限制不自动回退到其他入口。
 
 `OffsetReader` 提供只读、可 seek 的偏移视图。仅当确切九个 ASCII `0` 和后续大小合法的 ISO BMFF `ftyp` 首 box 同时成立时，才跳过九字节。不对所有 `.m4s` 删头，不读整课到内存，不在源目录生成规范化副本。
 

@@ -26,10 +26,17 @@ class Track(Record):
     channels: int | None = None
 
 
+class DownloadMetadata(Record):
+    """下载素材的最小身份信息；不接收 URL、请求头或任意文件路径。"""
+
+    title: str
+    bvid: str | None = None
+
+
 class Source(Record):
     schema_version: int = 1
     title: str
-    adapter: Literal["local", "bilibili-cache"]
+    adapter: Literal["local", "bilibili-cache", "yt-dlp"]
     tracks: list[Track]
     duration_us: int
     origin_us: int

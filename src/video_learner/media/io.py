@@ -8,9 +8,11 @@ from pathlib import Path
 
 import av
 from PIL import Image
+from pydantic import ValidationError
 
 from video_learner.common.core import US, InputError, TaskError
-from video_learner.common.schemas import Source, Track
+from video_learner.common.schemas import DownloadMetadata, Source, Track
+from video_learner.common.storage import read_json
 
 
 class OffsetReader(io.RawIOBase):
@@ -87,7 +89,7 @@ def track_of(source: Source, kind: str) -> Track:
 
 
 def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Source:
-    """只读探测单视频或单课时缓存，以视频轨道起点建立规范时间线。
+    """只读探测本地视频、缓存或已下载素材，以视频轨道起点建立规范时间线。
 
     默认只探测轨道；decode 抽查解码，full 顺序解码并核对声明时长。
     opened 表示所有候选媒体均打开并完成轨道探测，与元数据、轨道齐全及解码结果分开。
@@ -100,6 +102,7 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
     complete = None
     bvid = None
     diagnostics: list[str] = []
+    adapter = "bilibili-cache" if directory else "local"
     if directory:
         metadata = path / "videoInfo.json"
         if metadata.is_file() and metadata.stat().st_size <= 2_000_000:
@@ -117,6 +120,14 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
                     complete = None
             except (ValueError, AttributeError):
                 diagnostics.append("课程元数据无法解析，标题使用目录名")
+        download = path / "download.json"
+        if download.is_file():
+            try:
+                metadata = DownloadMetadata.model_validate(read_json(download))
+            except ValidationError as exc:
+                raise InputError("下载素材元数据损坏") from exc
+            title, bvid = metadata.title, metadata.bvid
+            adapter, complete = "yt-dlp", True
         files = sorted(p for p in path.iterdir() if p.is_file())
     else:
         files = [path]
@@ -190,7 +201,7 @@ def inspect_source(path: Path, decode: bool = False, full: bool = False) -> Sour
     )
     source = Source(
         title=title,
-        adapter="bilibili-cache" if directory else "local",
+        adapter=adapter,
         tracks=tracks,
         duration_us=video.duration_us,
         # 视频起点统一作为零点；音频即使更晚开始，也不能单独归零而丢掉同步偏移。

@@ -1,8 +1,10 @@
 # Video Learner
 
-将单个本地视频或 Bilibili 课时缓存转换成带截图、文字和来源时间戳的讲义，通过 CLI 局部修订文字与配图，导出 Markdown、HTML 和 PDF。
+将单个在线视频、本地视频或 Bilibili 课时缓存转换成带截图、文字和来源时间戳的讲义，通过 CLI 局部修订文字与配图，导出 Markdown、HTML 和 PDF。
 
 ## 当前状态
+
+三个输入入口并列支持：在线视频 URL/BVID 默认由 yt-dlp 下载，Bilibili 本地单课时缓存和普通本地视频直接读取。常规安装包含 yt-dlp，无需启用开关；下载素材与讲义分开保存，具体行为见[在线视频输入](docs/usage.md#在线视频输入)。
 
 P0 的 `inspect`、`convert`、`revise`、`export` 已实现。转换默认保存初稿 r001，再依次执行图文对应、讲义内容两轮独立复审，生成 `revisions/r002/`；每个成功版本同时提供 `notes.md`、`notes.html`、`notes.pdf`，CLI 返回最终版的三个路径。Markdown 与 JSON 是版本数据，HTML/PDF 是可重新导出的阅读副本。可配置复审顺序、自定义规则和只报告模式，见[独立复审](docs/usage.md#独立复审)。局部修改保留旧版本及非目标手改内容。自动复审仍有漏检和误改，关键内容需要对照原课核对。语音识别默认使用阿里云 Qwen，可显式选择本地 CPU/CUDA；图文整理默认使用 DeepSeek，也可选择 Qwen；两家共用初稿上下文、校验修复与复审隔离策略，单块修订的数量和类型约束在生成阶段执行有界修复。
 
@@ -38,6 +40,7 @@ HTML/PDF 阅读导出支持中文括号、引号边界的双星号加粗；Markd
 uv sync --locked
 uv run video-learner --help
 uv run video-learner inspect "D:\media\lesson.mp4" --decode
+uv run video-learner inspect "https://www.bilibili.com/video/BV1bK411W797?p=2" --decode
 uv run video-learner convert "D:\media\lesson.mp4" --asr-secret ".\secrets\aliyun.secret" --secret ".\secrets\deepseek.secret" --output ".\output\my-notes"
 ```
 
@@ -51,4 +54,4 @@ uv run video-learner export ".\output\my-notes" --base r002 --output ".\output\m
 
 `export` 默认生成三种格式；可重复传入 `--format` 只选择部分格式，详见[导出阅读副本](docs/usage.md#导出阅读副本)。
 
-真实视频位于仓库外；`output/`、`artifacts/`、`secrets/` 和模型均不提交。每个成功版本的 `notes.md` 和 `assets/` 可一起复制；继续修订须保留完整工作目录。
+真实样本位于仓库外；`output/`、`artifacts/`、`.cache/`、`secrets/` 和模型均不提交。每个成功版本的 `notes.md` 和 `assets/` 可一起复制；继续修订须保留完整工作目录和源素材，在线输入还须保留下载目录。

@@ -10,6 +10,7 @@ from rich.text import Text
 from video_learner.common.core import timestamp
 
 STAGES = {
+    "download": "在线视频下载",
     "prepare": "素材准备",
     "transcribe": "语音识别",
     "sample": "截图提取",
@@ -142,6 +143,8 @@ class TerminalProgress:
                 self.console.print(f"章节目标 {record['chapter_seconds']} 秒，转写后对齐边界。")
         elif stage == "chapter_plan":
             self.console.print(f"已划分 {record['chapters']} 章。")
+        elif stage == "download_source" and status == "ready":
+            self.console.print(f"下载素材：{record['path']}", markup=False)
         elif stage == "audio_boundary" and status == "selected":
             self.audio_chunks += 1
             self.pause_cuts += int(record.get("reason") == "pause")
@@ -165,7 +168,11 @@ class TerminalProgress:
                     self.console.print(f"{STAGES[stage]}…")
             if status == "progress":
                 completed, total = record["completed"], record["total"]
-                if record.get("unit") == "audio":
+                if record.get("unit") == "bytes":
+                    count = f"{completed / 1024 / 1024:.1f} MiB"
+                    if total:
+                        count += f" / {total / 1024 / 1024:.1f} MiB"
+                elif record.get("unit") == "audio":
                     count = f"{completed / total:.0%} · {timestamp(completed)} / {timestamp(total)}"
                 else:
                     count = f"{completed}/{total}"

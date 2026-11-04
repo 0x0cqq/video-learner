@@ -30,14 +30,22 @@ def root(ctx: typer.Context) -> None:
 
 @app.command("inspect")
 def inspect_command(
-    source: Annotated[Path, typer.Argument(help="本地视频或单课时缓存目录")],
+    source: Annotated[str, typer.Argument(help="在线视频 URL/BVID、本地视频或单课时缓存目录")],
     as_json: bool = typer.Option(False, "--json", help="机器可读 JSON"),
     decode: bool = typer.Option(False, help="抽查前、中、后部音视频解码"),
     full: bool = typer.Option(False, help="顺序解码全部音视频帧"),
+    download_dir: Annotated[
+        Path | None,
+        typer.Option(help="在线视频下载素材目录，默认 .cache/downloads；需保留以供修订"),
+    ] = None,
 ) -> None:
-    """检查本地视频或单课时缓存，输出媒体信息与诊断。"""
+    """检查在线视频、本地视频或单课时缓存；URL 会先下载，检查不调用 AI。"""
+    from video_learner.workflows.ingestion import resolve_source
+
     # 只转换显示格式：JSON 走 stdout，人工提示走 stderr；有诊断仍输出结果并返回非零码。
-    result = inspect_source(source, decode=decode, full=full)
+    with TerminalProgress(console) as progress:
+        path = resolve_source(source, download_dir, progress=progress)
+        result = inspect_source(path, decode=decode, full=full)
     if as_json:
         typer.echo(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
     else:
@@ -57,7 +65,7 @@ def inspect_command(
 
 @app.command("convert")
 def convert_command(
-    source: Annotated[Path, typer.Argument(help="本地视频或单课时缓存")],
+    source: Annotated[str, typer.Argument(help="在线视频 URL/BVID、本地视频或单课时缓存")],
     output: Annotated[Path, typer.Option(help="输出目录；已存在时需用 -f 删除覆盖")],
     force: bool = typer.Option(
         False, "--force", "-f", help="删除已有输出目录后重新转换，含旧版本和手改"
@@ -88,6 +96,10 @@ def convert_command(
         Path | None, typer.Option(help="PDF 中文 TTF/TTC 字体，Windows 优先 Noto Sans SC")
     ] = None,
     verbose: bool = typer.Option(False, "--verbose", help="显示详细阶段事件"),
+    download_dir: Annotated[
+        Path | None,
+        typer.Option(help="在线视频下载素材目录，默认 .cache/downloads；需保留以供修订"),
+    ] = None,
 ) -> None:
     """转换完整视频或 [start,end) 片段，输出图文讲义。"""
     from video_learner.common.config import load_config
@@ -122,6 +134,7 @@ def convert_command(
                 usage_report=reports.append,
                 force=force,
                 pdf_font=pdf_font,
+                download_dir=download_dir,
             )
     finally:
         for report in reports:

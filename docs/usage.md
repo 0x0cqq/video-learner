@@ -22,7 +22,22 @@ DeepSeek 凭据从 `DEEPSEEK_API_KEY` 读取，Qwen 从 `DASHSCOPE_API_KEY` 读�
 uv run video-learner inspect "D:\media\programming" --json --decode
 ```
 
-`--decode` 抽查前中后音视频，`--full` 顺序验证全部音视频解码。元数据下载完成、媒体打开、片段解码与全片验证分别显示。支持普通单视频文件及已知 Bilibili 单课时缓存，不递归处理多个课时，不下载在线视频。
+`--decode` 抽查前中后音视频，`--full` 顺序验证全部音视频解码。元数据下载完成、媒体打开、片段解码与全片验证分别显示。三个入口并列支持在线视频 URL/BVID、Bilibili 单课时本地缓存目录和普通本地视频，不递归处理多个课时。
+
+## 在线视频输入
+
+常规 `uv sync --locked` 已安装 yt-dlp，`inspect` 和 `convert` 会自动识别 HTTP(S) 视频链接或完整 BVID，无需启用开关：
+
+```powershell
+uv run video-learner inspect "https://www.bilibili.com/video/BV1bK411W797?p=2" --decode --json
+uv run video-learner convert "https://www.bilibili.com/video/BV1bK411W797?p=2" --asr-secret ".\secrets\aliyun.secret" --secret ".\secrets\deepseek.secret" --output ".\output\online-notes"
+```
+
+URL 用引号包裹以保留 `?p=` 和 `&`。Bilibili `?p=2` 选择第二 P；裸 BV 或未带 `?p=` 只取第一 P，不下载合集。其他站点需 yt-dlp 支持具体单视频 URL；播放列表和直播会报错。当前不提供站点登录参数，也不自动读取浏览器 Cookie；需要登录或受地区限制的视频可通过现有本地入口处理。特殊站点可能需要额外的 JavaScript 运行时或 FFmpeg，不能保证所有 yt-dlp 站点仅凭默认安装可用。
+
+下载默认写入当前工作目录下 `.cache/downloads/<随机ID>/`，也可用 `--download-dir "D:\media\downloads"` 指定根目录。素材与讲义输出必须分开，`--output` 不能与下载根目录重叠。终端显示成功素材路径，下载事件日志保存在该素材目录的 `.work/logs/events.jsonl`；不保存签名媒体 URL 或完整站点元数据。
+
+每次传入 URL 都下载完整视频，`--start`/`--end` 只限制后续转换片段。下载会保留画面和音频，分离流无需合并；探测和抽查解码通过后才发布素材，失败或中断清理本次下载。`inspect` 在线输入也会下载，但不调用 AI。检查成功后，可把终端显示的素材目录作为 `convert` 输入复用，避免再次下载。成功素材需保留供后续修订和精确换图，`-f` 仅删除讲义输出；导出已有文稿仍可离线且无需原视频。
 
 ## 转换
 
